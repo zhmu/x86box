@@ -18,7 +18,7 @@ class CPUx86
     /*! \brief Fetches and executes the next instruction
      *  \returns Number of clock cycles used
      */
-    int RunInstruction();
+    void RunInstruction();
 
     //! \brief Resets the CPU
     void Reset();
@@ -49,7 +49,7 @@ class CPUx86
         static const uint16_t FLAG_CF = (1 << 0);
         static const uint16_t FLAG_ON = (1 << 1); /* This flag is always set */
         static const uint16_t FLAG_PF = (1 << 2);
-        static const uint16_t FLAG_AF = (1 << 3);
+        static const uint16_t FLAG_AF = (1 << 4);
         static const uint16_t FLAG_ZF = (1 << 6);
         static const uint16_t FLAG_SF = (1 << 7);
         static const uint16_t FLAG_TF = (1 << 8);
@@ -69,16 +69,6 @@ class CPUx86
     const Memory& GetMemory() const { return m_Memory; }
     IO& GetIO() { return m_IO; }
     const IO& GetIO() const { return m_IO; }
-
-    inline bool FlagCarry() const { return m_State.m_flags & State::FLAG_CF; }
-    inline bool FlagParity() const { return m_State.m_flags & State::FLAG_PF; }
-    inline bool FlagAuxCarry() const { return m_State.m_flags & State::FLAG_AF; }
-    inline bool FlagZero() const { return m_State.m_flags & State::FLAG_ZF; }
-    inline bool FlagSign() const { return m_State.m_flags & State::FLAG_SF; }
-    inline bool FlagTrap() const { return m_State.m_flags & State::FLAG_TF; }
-    inline bool FlagInterrupt() const { return m_State.m_flags & State::FLAG_IF; }
-    inline bool FlagDirection() const { return m_State.m_flags & State::FLAG_DF; }
-    inline bool FlagOverflow() const { return m_State.m_flags & State::FLAG_OF; }
 
     static addr_t MakeAddr(uint16_t seg, uint16_t off);
 
@@ -110,63 +100,8 @@ class CPUx86
 
     void Handle0FPrefix();
 
-    uint8_t OR8(uint8_t a, uint8_t b);
-    uint16_t OR16(uint16_t a, uint16_t b);
-    uint8_t AND8(uint8_t a, uint8_t b);
-    uint16_t AND16(uint16_t a, uint16_t b);
-    uint8_t XOR8(uint8_t a, uint8_t b);
-    uint16_t XOR16(uint16_t a, uint16_t b);
-
-    uint8_t ADD8(uint8_t a, uint8_t b);
-    uint16_t ADD16(uint16_t a, uint16_t b);
-    uint8_t ADC8(uint8_t a, uint8_t b);
-    uint16_t ADC16(uint16_t a, uint16_t b);
-    uint8_t SUB8(uint8_t a, uint8_t b);
-    uint16_t SUB16(uint16_t a, uint16_t b);
-    uint8_t SBB8(uint8_t a, uint8_t b);
-    uint16_t SBB16(uint16_t a, uint16_t b);
-
-    uint8_t INC8(uint8_t a);
-    uint16_t INC16(uint16_t a);
-    uint8_t DEC8(uint8_t a);
-    uint16_t DEC16(uint16_t a);
-
-    void MUL8(uint8_t a);
-    void MUL16(uint16_t a);
-    void DIV8(uint8_t a);
-    void DIV16(uint16_t a);
-    void IMUL8(uint8_t a);
-    void IMUL16(uint16_t a);
-    void IDIV8(uint8_t a);
-    void IDIV16(uint16_t a);
-
-    uint8_t ROL8(uint8_t v, uint8_t n);
-    uint16_t ROL16(uint16_t v, uint8_t n);
-    uint8_t ROR8(uint8_t v, uint8_t n);
-    uint16_t ROR16(uint16_t v, uint8_t n);
-    uint8_t RCL8(uint8_t v, uint8_t n);
-    uint16_t RCL16(uint16_t v, uint8_t n);
-    uint8_t RCR8(uint8_t v, uint8_t n);
-    uint16_t RCR16(uint16_t v, uint8_t n);
-    uint8_t SHL8(uint8_t v, uint8_t n);
-    uint16_t SHL16(uint16_t v, uint8_t n);
-    uint8_t SHR8(uint8_t v, uint8_t n);
-    uint16_t SHR16(uint16_t v, uint8_t n);
-    uint8_t SAR8(uint8_t v, uint8_t n);
-    uint16_t SAR16(uint16_t v, uint8_t n);
-
-    void SetFlag(uint16_t flag, bool set);
-    void SetFlagsSZP8(uint8_t n);
-    void SetFlagsSZP16(uint16_t n);
-    void SetFlagsArith8(uint8_t a, uint8_t b, uint16_t res);
-    void SetFlagsArith16(uint16_t a, uint16_t b, uint32_t res);
-
     void HandleInterrupt(uint8_t no);
     void SignalInterrupt(uint8_t no);
-
-    void RelativeJump8(uint8_t n);
-    void RelativeJump16(uint16_t n);
-    int HandleSegmentOverride(int def);
 
     // These must be in sync with the x86 segment values (Sw)
     static const int SEG_ES = 0;

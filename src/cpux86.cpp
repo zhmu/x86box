@@ -1,21 +1,21 @@
 #include "cpux86.h"
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include "io.h"
 #include "memory.h"
 #include "vectors.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <bit>
+#include <utility>
 
 #define TRACE(x...) \
-    if (0)          \
-    fprintf(stderr, "[cpu] " x)
+    if (0) fprintf(stderr, "[cpu] " x)
 
 CPUx86::CPUx86(Memory& oMemory, IO& oIO, Vectors& oVectors)
     : m_Memory(oMemory), m_IO(oIO), m_Vectors(oVectors)
 {
 }
 
-CPUx86::~CPUx86() {}
+CPUx86::~CPUx86() = default;
 
 void CPUx86::Reset()
 {
@@ -30,18 +30,530 @@ void CPUx86::Reset()
     m_State.m_ax = 0x1234;
 }
 
-int CPUx86::RunInstruction()
+namespace
 {
-#define GET_MODRM register uint8_t modrm = GetNextOpcode()
-#define MODRM_XXX(modrm) ((modrm >> 3) & 7)
-#define IMM8 GetNextOpcode()
-#define GET_IMM8 register uint8_t imm = IMM8
-#define IMM16 (GetNextOpcode() | (uint16_t)GetNextOpcode() << 8)
-#define GET_IMM16 register uint16_t imm = IMM16
-#define DO_COND_JUMP(cond) \
-    GET_IMM8;              \
-    if (cond)              \
-    RelativeJump8(imm)
+    auto ModRm_XXX(const uint8_t modRm) { return (modRm >> 3) & 7; }
+
+    template<unsigned int BITS>
+    struct UintOfImpl;
+    template<>
+    struct UintOfImpl<8> {
+        using type = uint8_t;
+    };
+    template<>
+    struct UintOfImpl<16> {
+        using type = uint16_t;
+    };
+    template<>
+    struct UintOfImpl<32> {
+        using type = uint32_t;
+    };
+
+    template<unsigned int BITS>
+    using UintOf = UintOfImpl<BITS>::type;
+
+    template<uint16_t Flag>
+    [[nodiscard]] constexpr bool IsFlagSet(uint16_t flags) { return (flags & Flag) != 0; };
+
+    [[nodiscard]] constexpr bool FlagCarry(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_CF>(flags); }
+    [[nodiscard]] constexpr bool FlagZero(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_ZF>(flags); }
+    [[nodiscard]] constexpr bool FlagParity(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_PF>(flags); }
+    [[nodiscard]] constexpr bool FlagSign(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_SF>(flags); }
+    [[nodiscard]] constexpr bool FlagDirection(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_DF>(flags); }
+    [[nodiscard]] constexpr bool FlagOverflow(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_OF>(flags); }
+
+    template<uint16_t Flag>
+    constexpr void SetFlag(uint16_t& flags, bool set)
+    {
+        if (set)
+            flags |= Flag;
+        else
+            flags &= ~Flag;
+    }
+
+    template<unsigned int BITS>
+    constexpr void SetFlagsSZP(uint16_t& flags, UintOf<BITS> v);
+
+    template<>
+    constexpr void SetFlagsSZP<8>(uint16_t& flags, uint8_t n)
+    {
+        if (n & 0x80)
+            flags |= CPUx86::State::FLAG_SF;
+        if (n == 0)
+            flags |= CPUx86::State::FLAG_ZF;
+        const uint8_t pf = std::popcount(static_cast<uint8_t>(n & 0xff));
+        if ((pf & 1) == 0) flags |= CPUx86::State::FLAG_PF;
+    }
+
+    template<>
+    constexpr void SetFlagsSZP<16>(uint16_t& flags, uint16_t n)
+    {
+        if (n & 0x8000)
+            flags |= CPUx86::State::FLAG_SF;
+        if (n == 0)
+            flags |= CPUx86::State::FLAG_ZF;
+        // TODO
+        uint8_t pf =
+            ~((n & 0x80) ^ (n & 0x40) ^ (n & 0x20) ^ (n & 0x10) ^ (n & 0x08) ^ (n & 0x04) ^
+              (n & 0x02) ^ (n & 0x01));
+        if (pf & 1)
+            flags |= CPUx86::State::FLAG_PF;
+    }
+
+    template<unsigned int BITS>
+    constexpr void SetFlagsArith(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b, UintOf<2 * BITS> res);
+
+    template<>
+    constexpr void SetFlagsArith<8>(uint16_t& flags, uint8_t a, uint8_t b, uint16_t res)
+    {
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF |
+              CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<8>(flags, res);
+        if (res & 0xff00)
+            flags |= CPUx86::State::FLAG_CF;
+        // https://teaching.idallen.com/dat2343/10f/notes/040_overflow.txt
+        // Overflow can only happen when adding two numbers of the same sign and
+        // getting a different sign.  So, to detect overflow we don't care about
+        // any bits except the sign bits.  Ignore the other bits.
+        const auto sign_a = (a & 0x80) != 0;
+        const auto sign_b = (b & 0x80) != 0;
+        const auto sign_res = (res & 0x80) != 0;
+        if (sign_a == sign_b && sign_res != sign_a)
+            flags |= CPUx86::State::FLAG_OF;
+        if ((a ^ b ^ res) & 0x10)
+            flags |= CPUx86::State::FLAG_AF;
+    }
+
+    template<>
+    constexpr void SetFlagsArith<16>(uint16_t& flags, uint16_t a, uint16_t b, uint32_t res)
+    {
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF |
+              CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<16>(flags, res);
+        if (res & 0xffff0000)
+            flags |= CPUx86::State::FLAG_CF;
+        if ((a ^ res) & (a ^ b) & 0x8000)
+            flags |= CPUx86::State::FLAG_OF;
+        if ((a ^ b ^ res) & 0x10)
+            flags |= CPUx86::State::FLAG_AF;
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr auto ROL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    {
+        uint8_t cnt = n % BITS;
+        if (cnt > 0) {
+            v = (v << cnt) | (v >> (BITS - cnt));
+            SetFlag<CPUx86::State::FLAG_CF>(flags, v & 1);
+        }
+        if (n == 1)
+            SetFlag<CPUx86::State::FLAG_OF>(
+                flags, ((v & (1 << (BITS - 1))) ^ (FlagCarry(flags) ? 1 : 0)));
+        return v;
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr auto ROR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    {
+        const uint8_t cnt = n % BITS;
+        if (cnt > 0) {
+            v = (v >> cnt) | (v << (BITS - cnt));
+            SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << (BITS - 1)));
+        }
+        if (n == 1)
+            SetFlag<CPUx86::State::FLAG_OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
+        return v;
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr auto RCL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    {
+        const uint8_t cnt = (n & 0x1f) % (BITS + 1);
+        if (cnt > 0) {
+            const uint8_t tmp =
+                (v << cnt) | ((FlagCarry(flags) ? 1 : 0) << (cnt - 1)) | (v >> ((BITS + 1) - cnt));
+            SetFlag<CPUx86::State::FLAG_CF>(flags, (v >> (BITS - cnt)) & 1);
+            v = tmp;
+        }
+        if (n == 1)
+            SetFlag<CPUx86::State::FLAG_OF>(
+                flags, ((v & (1 << (BITS - 1))) ^ (FlagCarry(flags) ? 1 : 0)));
+        return v;
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr auto RCR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    {
+        if (n == 1)
+            SetFlag<CPUx86::State::FLAG_OF>(
+                flags, ((v & (1 << (BITS - 1))) ^ (FlagCarry(flags) ? 1 : 0)));
+        const uint8_t cnt = (n & 0x1f) % (BITS + 1);
+        if (cnt == 0)
+            return v;
+        const UintOf<BITS> tmp =
+            (v >> cnt) | ((FlagCarry(flags) ? 1 : 0)) << (BITS - cnt) | (v << ((BITS + 1) - cnt));
+        SetFlag<CPUx86::State::FLAG_CF>(flags, (v >> (cnt - 1) & 1));
+        return tmp;
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr auto SHL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    {
+        const uint8_t cnt = n & 0x1f;
+        if (cnt < BITS) {
+            if (cnt > 0)
+                SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << (BITS - cnt)));
+            return v << cnt;
+        } else {
+            SetFlag<CPUx86::State::FLAG_CF>(flags, false);
+            return 0;
+        }
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr auto SHR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    {
+        const uint8_t cnt = n & 0x1f;
+        if (cnt < BITS) {
+            if (cnt > 0)
+                SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << cnt));
+            v >>= cnt;
+        } else {
+            v = 0;
+            SetFlag<CPUx86::State::FLAG_CF>(flags, false);
+        }
+        if (n == 1)
+            SetFlag<CPUx86::State::FLAG_OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
+        SetFlagsSZP<BITS>(flags, v);
+        return v;
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr auto SAR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    {
+        uint8_t cnt = n & 0x1f;
+        if (cnt > 0)
+            SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << cnt));
+        if (cnt < BITS) {
+            if (v & (1 << (BITS - 1))) {
+                v = (v >> cnt) | (0xff << (BITS - cnt));
+            } else {
+                v >>= cnt;
+            }
+        } else /* cnt >= BITS */ {
+            if (v & (1 << (BITS - 1))) {
+                SetFlag<CPUx86::State::FLAG_CF>(flags, true);
+                v = (1 << BITS) - 1;
+            } else {
+                SetFlag<CPUx86::State::FLAG_CF>(flags, false);
+                v = 0;
+            }
+        }
+        if (n == 1)
+            SetFlag<CPUx86::State::FLAG_OF>(flags, 0);
+        SetFlagsSZP<BITS>(flags, v);
+        return v;
+    }
+
+    [[nodiscard]] constexpr uint8_t Add8(uint16_t& flags, uint8_t a, uint8_t b)
+    {
+        uint16_t res = a + b;
+        SetFlagsArith<8>(flags, a, b, res);
+        return res & 0xff;
+    }
+
+#if 0
+    namespace testing {
+        using VerifyAddTuple = std::tuple<uint8_t, uint8_t, uint16_t, uint8_t>;
+        constexpr bool VerifyAdd8(const VerifyAddTuple& t)
+        {
+            auto [ val1, val2, expected_flags, expected_result ] = t;
+            uint16_t flags = CPUx86::State::FLAG_ON;
+            auto result = Add8(flags, val1, val2);
+            return result == expected_result && flags == expected_flags;
+        }
+        #include "test_add8.cpp"
+    }
+#endif
+
+    [[nodiscard]] constexpr uint16_t Add16(uint16_t& flags, uint16_t a, uint16_t b)
+    {
+        uint32_t res = a + b;
+        SetFlagsArith<16>(flags, a, b, res);
+        return res & 0xffff;
+    }
+
+    [[nodiscard]] constexpr uint8_t Or8(uint16_t& flags, uint8_t a, uint8_t b)
+    {
+        uint8_t op1 = a | b;
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<8>(flags, op1);
+        return op1;
+    }
+
+    [[nodiscard]] constexpr uint16_t Or16(uint16_t& flags, uint16_t a, uint16_t b)
+    {
+        uint16_t op1 = a | b;
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<16>(flags, op1);
+        return op1;
+    }
+
+    [[nodiscard]] constexpr uint8_t And8(uint16_t& flags, uint8_t a, uint8_t b)
+    {
+        uint8_t op1 = a & b;
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<8>(flags, op1);
+        return op1;
+    }
+
+    [[nodiscard]] constexpr uint16_t And16(uint16_t& flags, uint16_t a, uint16_t b)
+    {
+        uint16_t op1 = a & b;
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<16>(flags, op1);
+        return op1;
+    }
+
+    [[nodiscard]] constexpr uint8_t Xor8(uint16_t& flags, uint8_t a, uint8_t b)
+    {
+        uint8_t op1 = a ^ b;
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<8>(flags, op1);
+        return op1;
+    }
+
+    [[nodiscard]] constexpr uint16_t Xor16(uint16_t& flags, uint16_t a, uint16_t b)
+    {
+        uint16_t op1 = a ^ b;
+        flags &=
+            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+        SetFlagsSZP<16>(flags, op1);
+        return op1;
+    }
+
+    [[nodiscard]] constexpr uint8_t Adc8(uint16_t& flags, uint8_t a, uint8_t b)
+    {
+        uint16_t res = a + b + FlagCarry(flags) ? 1 : 0;
+        SetFlagsArith<8>(flags, a, b, res);
+        return res & 0xff;
+    }
+
+    [[nodiscard]] constexpr uint16_t Adc16(uint16_t& flags, uint16_t a, uint16_t b)
+    {
+        uint32_t res = a + b + FlagCarry(flags) ? 1 : 0;
+        SetFlagsArith<16>(flags, a, b, res);
+        return res & 0xffff;
+    }
+
+    [[nodiscard]] constexpr uint8_t Sub8(uint16_t& flags, uint8_t a, uint8_t b)
+    {
+        uint16_t res = a - b;
+        SetFlagsArith<8>(flags, a, b, res);
+        return res & 0xff;
+    }
+
+    [[nodiscard]] constexpr uint16_t Sub16(uint16_t& flags, uint16_t a, uint16_t b)
+    {
+        uint32_t res = a - b;
+        SetFlagsArith<16>(flags, a, b, res);
+        return res & 0xffff;
+    }
+
+    [[nodiscard]] constexpr uint8_t Sbb8(uint16_t& flags, uint8_t a, uint8_t b)
+    {
+        uint16_t res = a - b - FlagCarry(flags) ? 1 : 0;
+        SetFlagsArith<8>(flags, a, b, res);
+        return res & 0xff;
+    }
+
+    [[nodiscard]] constexpr uint16_t Sbb16(uint16_t& flags, uint16_t a, uint16_t b)
+    {
+        uint32_t res = a - b - FlagCarry(flags) ? 1 : 0;
+        SetFlagsArith<16>(flags, a, b, res);
+        return res & 0xffff;
+    }
+
+    [[nodiscard]] constexpr uint8_t Inc8(uint16_t& flags, uint8_t a)
+    {
+        const auto carry = FlagCarry(flags);
+        uint8_t res = Add8(flags, a, 1);
+        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        return res;
+    }
+
+    [[nodiscard]] constexpr uint16_t Inc16(uint16_t& flags, uint16_t a)
+    {
+        const bool carry = FlagCarry(flags);
+        uint16_t res = Add16(flags, a, 1);
+        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        return res;
+    }
+
+    [[nodiscard]] constexpr uint8_t Dec8(uint16_t& flags, uint8_t a)
+    {
+        bool carry = FlagCarry(flags);
+        uint8_t res = Sub8(flags, a, 1);
+        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        return res;
+    }
+
+    [[nodiscard]] constexpr uint16_t Dec16(uint16_t& flags, uint16_t a)
+    {
+        bool carry = FlagCarry(flags);
+        uint16_t res = Sub16(flags, a, 1);
+        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        return res;
+    }
+
+    constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
+    {
+        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        ax = (ax & 0xff) * (uint16_t)a;
+        if (ax >= 0x100)
+            flags |= (CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+    }
+
+    constexpr void Mul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
+    {
+        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        dx = (ax * a) >> 16;
+        ax = (ax * a) & 0xffff;
+        if (dx != 0)
+            flags |= (CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+    }
+
+    constexpr void Imul8(uint16_t& flags, uint16_t& ax, uint8_t a)
+    {
+        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        ax = (ax & 0xff) * (uint16_t)a;
+        const uint8_t ah = (ax & 0xff00) >> 8;
+        SetFlag<CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF>(flags, ah == 0 || ah == 0xff);
+    }
+
+    constexpr void Imul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
+    {
+        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        uint32_t res = static_cast<uint32_t>(ax) * static_cast<uint32_t>(a);
+        dx = res >> 16;
+        ax = res & 0xffff;
+        SetFlag<CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF>(flags, dx == 0 || dx == 0xffff);
+    }
+
+    // Returns true to signal interrupt
+    [[nodiscard]] constexpr bool Div8(uint16_t& ax, uint8_t a)
+    {
+        if (a == 0)
+            return true;
+        if ((ax / a) > 0xff)
+            return true;
+        ax = ((ax % a) & 0xff) << 8 | ((ax / a) & 0xff);
+        // TODO This does not influence flags??
+        return false;
+    }
+
+    // Returns true to signal interrupt
+    [[nodiscard]] constexpr bool Div16(uint16_t& ax, uint16_t& dx, uint16_t a)
+    {
+        if (a == 0)
+            return true;
+        auto v = (static_cast<uint32_t>(dx) << 16) | static_cast<uint32_t>(ax);
+        if ((v / a) > 0xffff)
+            return true;
+        ax = (v / a) & 0xffff;
+        dx = (v % a) & 0xffff;
+        // TODO This does not influence flags??
+        return false;
+    }
+
+    // Returns true to signal interrupt
+    [[nodiscard]] constexpr bool Idiv8(uint16_t& ax, uint16_t& dx, uint8_t a)
+    {
+        if (a == 0)
+            return true;
+        int8_t res = ax / a;
+        if ((static_cast<int16_t>(ax) > 0 && res > 0x7f) || (static_cast<int16_t>(ax) < 0 && res < 0x80))
+            return true;
+        ax = ((ax % a) & 0xff) << 8 | ((ax / a) & 0xff);
+        // TODO This does not influence flags??
+        return false;
+    }
+
+    // Returns true to signal interrupt
+    [[nodiscard]] constexpr bool Idiv16(uint16_t& ax, uint16_t& dx, uint16_t a)
+    {
+        if (a == 0)
+            return true;
+        int32_t v = (static_cast<uint32_t>(dx) << 16) | static_cast<uint32_t>(ax);
+        if ((v > 0 && (v / a) > 0x7ffff) || (v < 0 && (v / a) < 0x80000))
+            return true;
+        ax = (v / a) & 0xffff;
+        dx = (v % a) & 0xffff;
+        // TODO This does not influence flags??
+        return false;
+    }
+
+    constexpr void RelativeJump8(uint16_t& ip, const uint8_t n)
+    {
+        if (n & 0x80)
+            ip -= 0x100 - n;
+        else
+            ip += static_cast<uint16_t>(n);
+    }
+
+    constexpr void RelativeJump16(uint16_t& ip, const uint16_t n)
+    {
+        if (n & 0x8000)
+            ip -= 0x10000 - n;
+        else
+            ip += n;
+    }
+
+    uint16_t HandleSegmentOverride(CPUx86::State& state, uint16_t def)
+    {
+        if ((state.m_prefix & CPUx86::State::PREFIX_SEG) == 0)
+            return def;
+        state.m_prefix &= ~CPUx86::State::PREFIX_SEG;
+        return state.m_seg_override;
+    }
+
+}
+
+void CPUx86::RunInstruction()
+{
+#if 0
+    VerifyAddTuple t{ 0x01, 0x0f, 0x0012, 0x10 };
+    auto [ val1, val2, expected_flags, expected_result ] = t;
+    uint16_t flags = CPUx86::State::FLAG_ON;
+    auto result = Add8(flags, val1, val2);
+    printf("result %x == expected_result %x\n", result, expected_result);
+    printf("flags %x == expected_flags %x\n", flags, expected_flags);
+    std::abort();
+#endif
+
+    auto getImm8 = [&]() { return GetNextOpcode(); };
+    auto getModRm = [&]() { return GetNextOpcode(); };
+    auto getImm16 = [&]() -> uint16_t {
+        uint16_t a = GetNextOpcode();
+        uint16_t b = GetNextOpcode();
+        return a | (b << 8);
+    };
+
+    auto handleConditionalJump = [&](bool take) {
+        const auto imm = getImm8();
+        if (take)
+            RelativeJump8(m_State.m_ip, imm);
+    };
+
+    auto todo = []() { TRACE("TODO\n"); };
+    auto invalidOpcode = []() { TRACE("invalidOpcode()\n"); std::abort(); };
 
     /*
      * The Op_... macro's follow the 80386 manual conventions (appendix F page
@@ -60,63 +572,61 @@ int CPUx86::RunInstruction()
 
     // op Ev Gv -> Ev = op(Ev, Gv)
 #define Op_EvGv(op)                 \
-    GET_MODRM;                      \
+    const auto modrm = getModRm();  \
     DecodeEA(modrm, m_DecodeState); \
-    WriteEA16(m_DecodeState, op##16(ReadEA16(m_DecodeState), GetReg16(MODRM_XXX(modrm))))
+    WriteEA16(m_DecodeState, op##16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))))
 
     // op Gv Ev -> Gv = op(Gv, Ev)
 #define Op_GvEv(op)                             \
-    GET_MODRM;                                  \
+    const auto modrm = getModRm();              \
     DecodeEA(modrm, m_DecodeState);             \
-    uint16_t& reg = GetReg16(MODRM_XXX(modrm)); \
-    reg = op##16(reg, ReadEA16(m_DecodeState))
+    uint16_t& reg = GetReg16(ModRm_XXX(modrm)); \
+    reg = op##16(m_State.m_flags, reg, ReadEA16(m_DecodeState))
 
     // Op Eb Gb -> Eb = op(Eb, Gb)
 #define Op_EbGb(op)                                   \
-    GET_MODRM;                                        \
+    const auto modrm = getModRm();                    \
     DecodeEA(modrm, m_DecodeState);                   \
     unsigned int shift;                               \
-    uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift); \
-    WriteEA8(m_DecodeState, op##8(ReadEA8(m_DecodeState), (reg >> shift) & 0xff))
+    uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
+    WriteEA8(m_DecodeState, op##8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff))
 
     // Op Gb Eb -> Gb = op(Gb, Eb)
 #define Op_GbEb(op)                                   \
-    GET_MODRM;                                        \
+    const auto modrm = getModRm();                    \
     DecodeEA(modrm, m_DecodeState);                   \
     unsigned int shift;                               \
-    uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift); \
-    SetReg8(reg, shift, op##8((reg >> shift) & 0xff, ReadEA8(m_DecodeState)))
+    uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
+    SetReg8(reg, shift, op##8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)))
 
-#define TODO TRACE("todo\n")
-#define INVALID_OPCODE abort()
 
-    uint8_t opcode = GetNextOpcode();
+    const auto opcode = GetNextOpcode();
     TRACE("cs:ip=%04x:%04x opcode 0x%02x\n", m_State.m_cs, m_State.m_ip - 1, opcode);
     switch (opcode) {
         case 0x00: /* ADD Eb Gb */ {
-            Op_EbGb(ADD);
+            Op_EbGb(Add);
             break;
         }
         case 0x01: /* ADD Ev Gv */ {
-            Op_EvGv(ADD);
+            Op_EvGv(Add);
             break;
         }
         case 0x02: /* ADD Gb Eb */ {
-            Op_GbEb(ADD);
+            Op_GbEb(Add);
             break;
         }
         case 0x03: /* ADD Gv Ev */ {
-            Op_GvEv(ADD);
+            Op_GvEv(Add);
             break;
         }
         case 0x04: /* ADD AL Ib */ {
-            GET_IMM8;
-            m_State.m_ax = (m_State.m_ax & 0xff00) | ADD8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | Add8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x05: /* ADD eAX Iv */ {
-            GET_IMM16;
-            m_State.m_ax = ADD16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            m_State.m_ax = Add16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x06: /* PUSH ES */ {
@@ -128,29 +638,29 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x08: /* OR Eb Gb */ {
-            Op_EbGb(OR);
+            Op_EbGb(Or);
             break;
         }
         case 0x09: /* OR Ev Gv */ {
-            Op_EvGv(OR);
+            Op_EvGv(Or);
             break;
         }
         case 0x0a: /* OR Gb Eb */ {
-            Op_GbEb(OR);
+            Op_GbEb(Or);
             break;
         }
         case 0x0b: /* OR Gv Ev */ {
-            Op_GvEv(OR);
+            Op_GvEv(Or);
             break;
         }
         case 0x0c: /* OR AL Ib */ {
-            GET_IMM8;
-            m_State.m_ax = (m_State.m_ax & 0xff00) | OR8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | Or8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x0d: /* OR eAX Iv */ {
-            GET_IMM16;
-            m_State.m_ax = OR16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            m_State.m_ax = Or16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x0e: /* PUSH CS */ {
@@ -162,29 +672,29 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x10: /* ADC Eb Gb */ {
-            Op_EbGb(ADC);
+            Op_EbGb(Adc);
             break;
         }
         case 0x11: /* ADC Ev Gv */ {
-            Op_EvGv(ADC);
+            Op_EvGv(Adc);
             break;
         }
         case 0x12: /* ADC Gb Eb */ {
-            Op_GbEb(ADC);
+            Op_GbEb(Adc);
             break;
         }
         case 0x13: /* ADC Gv Ev */ {
-            Op_GvEv(ADC);
+            Op_GvEv(Adc);
             break;
         }
         case 0x14: /* ADC AL Ib */ {
-            GET_IMM8;
-            m_State.m_ax = (m_State.m_ax & 0xff00) | ADC8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | Adc8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x15: /* ADC eAX Iv */ {
-            GET_IMM16;
-            m_State.m_ax = ADC16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            m_State.m_ax = Adc16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x16: /* PUSH SS */ {
@@ -196,29 +706,29 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x18: /* SBB Eb Gb */ {
-            Op_EbGb(SBB);
+            Op_EbGb(Sbb);
             break;
         }
         case 0x19: /* SBB Ev Gv */ {
-            Op_EvGv(SBB);
+            Op_EvGv(Sbb);
             break;
         }
         case 0x1a: /* SBB Gb Eb */ {
-            Op_GbEb(SBB);
+            Op_GbEb(Sbb);
             break;
         }
         case 0x1b: /* SBB Gv Ev */ {
-            Op_GvEv(SBB);
+            Op_GvEv(Sbb);
             break;
         }
         case 0x1c: /* SBB AL Ib */ {
-            GET_IMM8;
-            m_State.m_ax = (m_State.m_ax & 0xff00) | SBB8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | Sbb8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x1d: /* SBB eAX Iv */ {
-            GET_IMM16;
-            m_State.m_ax = SBB16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            m_State.m_ax = Sbb16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x1e: /* PUSH DS */ {
@@ -230,29 +740,29 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x20: /* AND Eb Gb */ {
-            Op_EbGb(AND);
+            Op_EbGb(And);
             break;
         }
         case 0x21: /* AND Ev Gv */ {
-            Op_EvGv(AND);
+            Op_EvGv(And);
             break;
         }
         case 0x22: /* AND Gb Eb */ {
-            Op_GbEb(AND);
+            Op_GbEb(And);
             break;
         }
         case 0x23: /* AND Gv Ev */ {
-            Op_GvEv(AND);
+            Op_GvEv(And);
             break;
         }
         case 0x24: /* AND AL Ib */ {
-            GET_IMM8;
-            m_State.m_ax = (m_State.m_ax & 0xff00) | AND8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x25: /* AND eAX Iv */ {
-            GET_IMM16;
-            m_State.m_ax = AND16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            m_State.m_ax = And16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x26: /* ES: */ {
@@ -261,33 +771,33 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x27: /* DAA */ {
-            TODO;
+            todo();
             break;
         }
         case 0x28: /* SUB Eb Gb */ {
-            Op_EbGb(SUB);
+            Op_EbGb(Sub);
             break;
         }
         case 0x29: /* SUB Ev Gv */ {
-            Op_EvGv(SUB);
+            Op_EvGv(Sub);
             break;
         }
         case 0x2a: /* SUB Gb Eb */ {
-            Op_GbEb(SUB);
+            Op_GbEb(Sub);
             break;
         }
         case 0x2b: /* SUB Gv Ev */ {
-            Op_GvEv(SUB);
+            Op_GvEv(Sub);
             break;
         }
         case 0x2c: /* SUB AL Ib */ {
-            GET_IMM8;
-            m_State.m_ax = (m_State.m_ax & 0xff00) | SUB8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x2d: /* SUB eAX Iv */ {
-            GET_IMM16;
-            m_State.m_ax = SUB16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            m_State.m_ax = Sub16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x2e: /* CS: */ {
@@ -296,33 +806,33 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x2f: /* DAS */ {
-            TODO;
+            todo();
             break;
         }
         case 0x30: /* XOR Eb Gb */ {
-            Op_EbGb(XOR);
+            Op_EbGb(Xor);
             break;
         }
         case 0x31: /* XOR Ev Gv */ {
-            Op_EvGv(XOR);
+            Op_EvGv(Xor);
             break;
         }
         case 0x32: /* XOR Gb Eb */ {
-            Op_GbEb(XOR);
+            Op_GbEb(Xor);
             break;
         }
         case 0x33: /* XOR Gv Ev */ {
-            Op_GvEv(XOR);
+            Op_GvEv(Xor);
             break;
         }
         case 0x34: /* XOR AL Ib */ {
-            GET_IMM8;
-            m_State.m_ax = (m_State.m_ax & 0xff00) | XOR8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | Xor8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x35: /* XOR eAX Iv */ {
-            GET_IMM16;
-            m_State.m_ax = XOR16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            m_State.m_ax = Xor16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x36: /* SS: */ {
@@ -331,45 +841,45 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x37: /* AAA */ {
-            TODO;
+            todo();
             break;
         }
         case 0x38: /* CMP Eb Gb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift);
-            SUB8(ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
+            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
+            [[maybe_unused]] auto _ = Sub8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
             break;
         }
         case 0x39: /* CMP Ev Gv */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            SUB16(ReadEA16(m_DecodeState), GetReg16(MODRM_XXX(modrm)));
+            [[maybe_unused]] auto _  = Sub16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
             break;
         }
         case 0x3a: /* CMP Gb Eb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift);
-            SUB8((reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
+            [[maybe_unused]] auto _  = Sub8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x3b: /* CMP Gv Ev */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            SUB16(GetReg16(MODRM_XXX(modrm)), ReadEA16(m_DecodeState));
+            [[maybe_unused]] auto _  = Sub16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x3c: /* CMP AL Ib */ {
-            GET_IMM8;
-            SUB8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            [[maybe_unused]] auto _  = Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x3d: /* CMP eAX Iv */ {
-            GET_IMM16;
-            SUB16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            [[maybe_unused]] auto _  = Sub16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x3e: /* DS: */ {
@@ -378,71 +888,71 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x3f: /* AAS */ {
-            TODO;
+            todo();
             break;
         }
         case 0x40: /* INC eAX */ {
-            m_State.m_ax = INC16(m_State.m_ax);
+            m_State.m_ax = Inc16(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x41: /* INC eCX */ {
-            m_State.m_cx = INC16(m_State.m_cx);
+            m_State.m_cx = Inc16(m_State.m_flags, m_State.m_cx);
             break;
         }
         case 0x42: /* INC eDX */ {
-            m_State.m_dx = INC16(m_State.m_dx);
+            m_State.m_dx = Inc16(m_State.m_flags, m_State.m_dx);
             break;
         }
         case 0x43: /* INC eBX */ {
-            m_State.m_bx = INC16(m_State.m_bx);
+            m_State.m_bx = Inc16(m_State.m_flags, m_State.m_bx);
             break;
         }
         case 0x44: /* INC eSP */ {
-            m_State.m_sp = INC16(m_State.m_sp);
+            m_State.m_sp = Inc16(m_State.m_flags, m_State.m_sp);
             break;
         }
         case 0x45: /* INC eBP */ {
-            m_State.m_bp = INC16(m_State.m_bp);
+            m_State.m_bp = Inc16(m_State.m_flags, m_State.m_bp);
             break;
         }
         case 0x46: /* INC eSI */ {
-            m_State.m_si = INC16(m_State.m_si);
+            m_State.m_si = Inc16(m_State.m_flags, m_State.m_si);
             break;
         }
         case 0x47: /* INC eDI */ {
-            m_State.m_di = INC16(m_State.m_di);
+            m_State.m_di = Inc16(m_State.m_flags, m_State.m_di);
             break;
         }
         case 0x48: /* DEC eAX */ {
-            m_State.m_ax = DEC16(m_State.m_ax);
+            m_State.m_ax = Dec16(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x49: /* DEC eCX */ {
-            m_State.m_cx = DEC16(m_State.m_cx);
+            m_State.m_cx = Dec16(m_State.m_flags, m_State.m_cx);
             break;
         }
         case 0x4a: /* DEC eDX */ {
-            m_State.m_dx = DEC16(m_State.m_dx);
+            m_State.m_dx = Dec16(m_State.m_flags, m_State.m_dx);
             break;
         }
         case 0x4b: /* DEC eBX */ {
-            m_State.m_bx = DEC16(m_State.m_bx);
+            m_State.m_bx = Dec16(m_State.m_flags, m_State.m_bx);
             break;
         }
         case 0x4c: /* DEC eSP */ {
-            m_State.m_sp = DEC16(m_State.m_sp);
+            m_State.m_sp = Dec16(m_State.m_flags, m_State.m_sp);
             break;
         }
         case 0x4d: /* DEC eBP */ {
-            m_State.m_bp = DEC16(m_State.m_bp);
+            m_State.m_bp = Dec16(m_State.m_flags, m_State.m_bp);
             break;
         }
         case 0x4e: /* DEC eSI */ {
-            m_State.m_si = DEC16(m_State.m_si);
+            m_State.m_si = Dec16(m_State.m_flags, m_State.m_si);
             break;
         }
         case 0x4f: /* DEC eDI */ {
-            m_State.m_di = DEC16(m_State.m_di);
+            m_State.m_di = Dec16(m_State.m_flags, m_State.m_di);
             break;
         }
         case 0x50: /* PUSH eAX */ {
@@ -510,324 +1020,324 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x60: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x61: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x62: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x63: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x64: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x65: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x66: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x67: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x68: /* PUSH imm16 */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             Push16(imm);
             break;
         }
         case 0x69: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x6a: /* PUSH imm8 */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             int16_t imm16 = (int16_t)imm;
+            // TODO
             Push16(imm16);
             break;
         }
         case 0x6b: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x6c: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x6d: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x6e: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x6f: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0x70: /* JO Jb */ {
-            DO_COND_JUMP(FlagOverflow());
+            handleConditionalJump(FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x71: /* JNO Jb */ {
-            DO_COND_JUMP(!FlagOverflow());
+            handleConditionalJump(!FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x72: /* JB Jb */ {
-            DO_COND_JUMP(FlagCarry());
+            handleConditionalJump(FlagCarry(m_State.m_flags));
             break;
         }
         case 0x73: /* JNB Jb */ {
-            DO_COND_JUMP(!FlagCarry());
+            handleConditionalJump(!FlagCarry(m_State.m_flags));
             break;
         }
         case 0x74: /* JZ Jb */ {
-            DO_COND_JUMP(FlagZero());
+            handleConditionalJump(FlagZero(m_State.m_flags));
             break;
         }
         case 0x75: /* JNZ Jb */ {
-            DO_COND_JUMP(!FlagZero());
+            handleConditionalJump(!FlagZero(m_State.m_flags));
             break;
         }
         case 0x76: /* JBE Jb */ {
-            DO_COND_JUMP(FlagCarry() || FlagZero());
+            handleConditionalJump(FlagCarry(m_State.m_flags) || FlagZero(m_State.m_flags));
             break;
         }
         case 0x77: /* JA Jb */ {
-            DO_COND_JUMP(!FlagCarry() && !FlagZero());
+            handleConditionalJump(!FlagCarry(m_State.m_flags) && !FlagZero(m_State.m_flags));
             break;
         }
         case 0x78: /* JS Jb */ {
-            DO_COND_JUMP(FlagSign());
+            handleConditionalJump(FlagSign(m_State.m_flags));
             break;
         }
         case 0x79: /* JNS Jb */ {
-            DO_COND_JUMP(!FlagSign());
+            handleConditionalJump(!FlagSign(m_State.m_flags));
             break;
         }
         case 0x7a: /* JPE Jb */ {
-            DO_COND_JUMP(FlagParity());
+            handleConditionalJump(FlagParity(m_State.m_flags));
             break;
         }
         case 0x7b: /* JPO Jb */ {
-            DO_COND_JUMP(!FlagParity());
+            handleConditionalJump(!FlagParity(m_State.m_flags));
             break;
         }
         case 0x7c: /* JL Jb */ {
-            DO_COND_JUMP(FlagSign() != FlagOverflow());
+            handleConditionalJump(FlagSign(m_State.m_flags) != FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x7d: /* JGE Jb */ {
-            DO_COND_JUMP(FlagSign() == FlagOverflow());
+            handleConditionalJump(FlagSign(m_State.m_flags) == FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x7e: /* JLE Jb */ {
-            DO_COND_JUMP(FlagSign() != FlagOverflow() || FlagZero());
+            handleConditionalJump(FlagSign(m_State.m_flags) != FlagOverflow(m_State.m_flags) || FlagZero(m_State.m_flags));
             break;
         }
         case 0x7f: /* JG Jb */ {
-            DO_COND_JUMP(!FlagZero() && FlagSign() == FlagOverflow());
+            handleConditionalJump(!FlagZero(m_State.m_flags) && FlagSign(m_State.m_flags) == FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x80:
         case 0x82: /* GRP1 Eb Ib */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GET_IMM8;
+            const auto imm = getImm8();
 
             uint8_t val = ReadEA8(m_DecodeState);
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA8(m_DecodeState, ADD8(val, imm));
+                    WriteEA8(m_DecodeState, Add8(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA8(m_DecodeState, OR8(val, imm));
+                    WriteEA8(m_DecodeState, Or8(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA8(m_DecodeState, ADC8(val, imm));
+                    WriteEA8(m_DecodeState, Adc8(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA8(m_DecodeState, SBB8(val, imm));
+                    WriteEA8(m_DecodeState, Sbb8(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA8(m_DecodeState, AND8(val, imm));
+                    WriteEA8(m_DecodeState, And8(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA8(m_DecodeState, SUB8(val, imm));
+                    WriteEA8(m_DecodeState, Sub8(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA8(m_DecodeState, XOR8(val, imm));
+                    WriteEA8(m_DecodeState, Xor8(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    fprintf(stderr, ">>> val=%x imm=%x\n", val, imm);
-                    SUB8(val, imm);
+                    [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, imm);
                     break;
             }
             break;
         }
         case 0x81: /* GRP1 Ev Iv */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GET_IMM16;
+            const auto imm = getImm16();
 
             uint16_t val = ReadEA16(m_DecodeState);
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, ADD16(val, imm));
+                    WriteEA16(m_DecodeState, Add16(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, OR16(val, imm));
+                    WriteEA16(m_DecodeState, Or16(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, ADC16(val, imm));
+                    WriteEA16(m_DecodeState, Adc16(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, SBB16(val, imm));
+                    WriteEA16(m_DecodeState, Sbb16(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, AND16(val, imm));
+                    WriteEA16(m_DecodeState, And16(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, SUB16(val, imm));
+                    WriteEA16(m_DecodeState, Sub16(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, XOR16(val, imm));
+                    WriteEA16(m_DecodeState, Xor16(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    SUB16(val, imm);
+                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags, val, imm);
                     break;
             }
             break;
         }
         case 0x83: /* GRP1 Ev Ib */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GET_IMM8;
+            const auto imm = getImm8();
 
             uint16_t val = ReadEA16(m_DecodeState);
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, ADD16(val, imm));
+                    WriteEA16(m_DecodeState, Add16(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, OR16(val, imm));
+                    WriteEA16(m_DecodeState, Or16(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, ADC16(val, imm));
+                    WriteEA16(m_DecodeState, Adc16(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, SBB16(val, imm));
+                    WriteEA16(m_DecodeState, Sbb16(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, AND16(val, imm));
+                    WriteEA16(m_DecodeState, And16(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, SUB16(val, imm));
+                    WriteEA16(m_DecodeState, Sub16(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, XOR16(val, imm));
+                    WriteEA16(m_DecodeState, Xor16(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    SUB16(val, imm);
+                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags, val, imm);
                     break;
             }
             break;
         }
         case 0x84: /* TEST Gb Eb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift);
-            AND8((reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
+            [[maybe_unused]] auto _ = And8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x85: /* TEST Gv Ev */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            AND16(GetReg16(MODRM_XXX(modrm)), ReadEA16(m_DecodeState));
+            [[maybe_unused]] auto _ = And16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x86: /* XCHG Gb Eb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift);
+            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
             uint8_t prev_reg = (reg >> shift) & 0xff;
             SetReg8(reg, shift, ReadEA8(m_DecodeState));
             WriteEA8(m_DecodeState, prev_reg);
             break;
         }
         case 0x87: /* XCHG Gv Ev */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            uint16_t& reg = GetReg16(MODRM_XXX(modrm));
+            uint16_t& reg = GetReg16(ModRm_XXX(modrm));
             uint16_t prev_reg = reg;
             reg = ReadEA16(m_DecodeState);
             WriteEA16(m_DecodeState, prev_reg);
             break;
         }
         case 0x88: /* MOV Eb Gb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift);
+            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
             WriteEA8(m_DecodeState, (reg >> shift) & 0xff);
             break;
         }
         case 0x89: /* MOV Ev Gv */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            WriteEA16(m_DecodeState, GetReg16(MODRM_XXX(modrm)));
+            WriteEA16(m_DecodeState, GetReg16(ModRm_XXX(modrm)));
             break;
         }
         case 0x8a: /* MOV Gb Eb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(MODRM_XXX(modrm), shift);
+            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
             SetReg8(reg, shift, ReadEA8(m_DecodeState));
             break;
         }
         case 0x8b: /* MOV Gv Ev */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GetReg16(MODRM_XXX(modrm)) = ReadEA16(m_DecodeState);
+            GetReg16(ModRm_XXX(modrm)) = ReadEA16(m_DecodeState);
             break;
         }
         case 0x8c: /* MOV Ew Sw */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            WriteEA16(m_DecodeState, GetSReg16(MODRM_XXX(modrm)));
+            WriteEA16(m_DecodeState, GetSReg16(ModRm_XXX(modrm)));
             break;
         }
         case 0x8d: /* LEA Gv M */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GetReg16(MODRM_XXX(modrm)) = GetAddrEA16(m_DecodeState);
+            GetReg16(ModRm_XXX(modrm)) = GetAddrEA16(m_DecodeState);
             break;
         }
         case 0x8e: /* MOV Sw Ew */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GetSReg16(MODRM_XXX(modrm)) = ReadEA16(m_DecodeState);
+            GetSReg16(ModRm_XXX(modrm)) = ReadEA16(m_DecodeState);
             break;
         }
         case 0x8f: /* POP Ev */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             WriteEA16(m_DecodeState, Pop16());
             break;
@@ -861,8 +1371,8 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x9a: /* CALL Ap */ {
-            uint16_t ip = IMM16;
-            uint16_t cs = IMM16;
+            const auto ip = getImm16();
+            const auto cs = getImm16();
             Push16(m_State.m_cs);
             Push16(m_State.m_ip);
             m_State.m_cs = cs;
@@ -870,7 +1380,7 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x9b: /* WAIT */ {
-            TODO; /* XXX Do we need this? */
+            todo(); /* XXX Do we need this? */
             break;
         }
         case 0x9c: /* PUSHF */ {
@@ -886,37 +1396,37 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0x9f: /* LAHF */ {
-            m_State.m_ax = (m_State.m_ax & 0xff) | ((m_State.m_flags | State::FLAG_ON) & 0xff) << 8;
+            m_State.m_ax = (m_State.m_ax & 0xff) | ((m_State.m_flags & 0xff) << 8);
             break;
         }
         case 0xa0: /* MOV AL Ob */ {
-            GET_IMM16;
-            int seg = HandleSegmentOverride(SEG_DS);
+            const auto imm = getImm16();
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax =
                 (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(seg), imm));
             break;
         }
         case 0xa1: /* MOV eAX Ov */ {
-            GET_IMM16;
-            int seg = HandleSegmentOverride(SEG_DS);
+            const auto imm = getImm16();
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(seg), imm));
             break;
         }
         case 0xa2: /* MOV Ob AL */ {
-            GET_IMM16;
-            int seg = HandleSegmentOverride(SEG_DS);
+            const auto imm = getImm16();
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_Memory.WriteByte(MakeAddr(GetSReg16(seg), imm), m_State.m_ax & 0xff);
             break;
         }
         case 0xa3: /* MOV Ov eAX */ {
-            GET_IMM16;
-            int seg = HandleSegmentOverride(SEG_DS);
+            const auto imm = getImm16();
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_Memory.WriteWord(MakeAddr(GetSReg16(seg), imm), m_State.m_ax);
             break;
         }
         case 0xa4: /* MOVSB */ {
-            int delta = FlagDirection() ? -1 : 1;
-            int seg = HandleSegmentOverride(SEG_DS);
+            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
@@ -937,8 +1447,8 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xa5: /* MOVSW */ {
-            int delta = FlagDirection() ? -2 : 2;
-            int seg = HandleSegmentOverride(SEG_DS);
+            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
@@ -959,23 +1469,23 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xa6: /* CMPSB */ {
-            int delta = FlagDirection() ? -1 : 1;
-            int seg = HandleSegmentOverride(SEG_DS);
+            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    SUB8(
+                    [[maybe_unused]] auto _ = Sub8(m_State.m_flags,
                         m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
-                    if (FlagZero() == break_on_zf)
+                    if (FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
             } else {
-                SUB8(
+                [[maybe_unused]] auto _ = Sub8(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -984,23 +1494,23 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xa7: /* CMPSW */ {
-            int delta = FlagDirection() ? -2 : 2;
-            int seg = HandleSegmentOverride(SEG_DS);
+            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    SUB16(
+                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags,
                         m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
-                    if (FlagZero() == break_on_zf)
+                    if (FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
             } else {
-                SUB16(
+                [[maybe_unused]] auto _ = Sub16(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -1009,17 +1519,17 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xa8: /* TEST AL Ib */ {
-            GET_IMM8;
-            AND8(m_State.m_ax & 0xff, imm);
+            const auto imm = getImm8();
+            [[maybe_unused]] auto _ = And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0xa9: /* TEST eAX Iv */ {
-            GET_IMM16;
-            AND16(m_State.m_ax, imm);
+            const auto imm = getImm16();
+            [[maybe_unused]] auto _ = And16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0xaa: /* STOSB */ {
-            int delta = FlagDirection() ? -1 : 1;
+            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
             uint8_t value = m_State.m_ax & 0xff;
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
@@ -1035,7 +1545,7 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xab: /* STOSW */ {
-            int delta = FlagDirection() ? -2 : 2;
+            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
@@ -1050,151 +1560,151 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xac: /* LODSB */ {
-            int seg = HandleSegmentOverride(SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax =
                 (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si));
-            if (FlagDirection())
+            if (FlagDirection(m_State.m_flags))
                 m_State.m_si--;
             else
                 m_State.m_si++;
             break;
         }
         case 0xad: /* LODSW */ {
-            int seg = HandleSegmentOverride(SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si));
-            if (FlagDirection())
+            if (FlagDirection(m_State.m_flags))
                 m_State.m_si -= 2;
             else
                 m_State.m_si += 2;
             break;
         }
         case 0xae: /* SCASB */ {
-            int delta = FlagDirection() ? -1 : 1;
+            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
             uint8_t val = m_State.m_ax & 0xff;
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    SUB8(val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                    [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
-                    if (FlagZero() == break_on_zf)
+                    if (FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
             } else {
-                SUB8(val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
         }
         case 0xaf: /* SCASW */ {
-            int delta = FlagDirection() ? -2 : 2;
+            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
             if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
                 bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    SUB16(m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
-                    if (FlagZero() == break_on_zf)
+                    if (FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
             } else {
-                SUB16(m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                [[maybe_unused]] auto _ = Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
         }
         case 0xb0: /* MOV AL Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_ax = (m_State.m_ax & 0xff00) | imm;
             break;
         }
         case 0xb1: /* MOV CL Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_cx = (m_State.m_cx & 0xff00) | imm;
             break;
         }
         case 0xb2: /* MOV DL Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_dx = (m_State.m_dx & 0xff00) | imm;
             break;
         }
         case 0xb3: /* MOV BL Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_bx = (m_State.m_bx & 0xff00) | imm;
             break;
         }
         case 0xb4: /* MOV AH Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_ax = (m_State.m_ax & 0xff) | ((uint16_t)imm << 8);
             break;
         }
         case 0xb5: /* MOV CH Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_cx = (m_State.m_cx & 0xff) | ((uint16_t)imm << 8);
             break;
         }
         case 0xb6: /* MOV DH Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_dx = (m_State.m_dx & 0xff) | ((uint16_t)imm << 8);
             break;
         }
         case 0xb7: /* MOV BH Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_bx = (m_State.m_bx & 0xff) | ((uint16_t)imm << 8);
             break;
         }
         case 0xb8: /* MOV eAX Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_ax = imm;
             break;
         }
         case 0xb9: /* MOV eCX Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_cx = imm;
             break;
         }
         case 0xba: /* MOV eDX Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_dx = imm;
             break;
         }
         case 0xbb: /* MOV eBX Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_bx = imm;
             break;
         }
         case 0xbc: /* MOV eSP Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_sp = imm;
             break;
         }
         case 0xbd: /* MOV eBP Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_bp = imm;
             break;
         }
         case 0xbe: /* MOV eSI Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_si = imm;
             break;
         }
         case 0xbf: /* MOV eDI Iv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_di = imm;
             break;
         }
         case 0xc0: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xc1: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xc2: /* RET Iw */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_ip = Pop16();
             m_State.m_sp += imm;
             break;
@@ -1205,9 +1715,9 @@ int CPUx86::RunInstruction()
         }
         case 0xc4: /* LES Gv Mp */
         case 0xc5: /* LDS Gv Mp */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            uint16_t& reg = GetReg16(MODRM_XXX(modrm));
+            uint16_t& reg = GetReg16(ModRm_XXX(modrm));
 
             uint16_t new_off = ReadEA16(m_DecodeState);
             m_DecodeState.m_off += 2;
@@ -1221,29 +1731,29 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xc6: /* MOV Eb Ib */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GET_IMM8;
+            const auto imm = getImm8();
             WriteEA8(m_DecodeState, imm);
             break;
         }
         case 0xc7: /* MOV Ev Iv */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GET_IMM16;
+            const auto imm = getImm16();
             WriteEA16(m_DecodeState, imm);
             break;
         }
         case 0xc8: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xc9: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xca: /* RETF Iw */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_State.m_ip = Pop16();
             m_State.m_cs = Pop16();
             m_State.m_sp += imm;
@@ -1259,12 +1769,12 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xcd: /* INT Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             HandleInterrupt(imm);
             break;
         }
         case 0xce: /* INTO */ {
-            if (!FlagOverflow())
+            if (!FlagOverflow(m_State.m_flags))
                 HandleInterrupt(INT_OVERFLOW);
             break;
         }
@@ -1275,255 +1785,254 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xd0: /* GRP2 Eb 1 */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             uint8_t val = ReadEA8(m_DecodeState);
             switch (op) {
                 case 0: // rol
-                    val = ROL8(val, 1);
+                    val = ROL<8>(m_State.m_flags, val, 1);
                     break;
                 case 1: // ror
-                    val = ROR8(val, 1);
+                    val = ROR<8>(m_State.m_flags, val, 1);
                     break;
                 case 2: // rcl
-                    val = RCL8(val, 1);
+                    val = RCL<8>(m_State.m_flags, val, 1);
                     break;
                 case 3: // rcr
-                    val = RCR8(val, 1);
+                    val = RCR<8>(m_State.m_flags, val, 1);
                     break;
                 case 4: // shl
-                    val = SHL8(val, 1);
+                    val = SHL<8>(m_State.m_flags, val, 1);
                     break;
                 case 5: // shr
-                    val = SHR8(val, 1);
+                    val = SHR<8>(m_State.m_flags, val, 1);
                     break;
                 case 6: // undefined
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR8(val, 1);
+                    val = SAR<8>(m_State.m_flags, val, 1);
                     break;
             }
             WriteEA8(m_DecodeState, val);
             break;
         }
         case 0xd1: /* GRP2 Ev 1 */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             uint16_t val = ReadEA16(m_DecodeState);
             switch (op) {
                 case 0: // rol
-                    val = ROL16(val, 1);
+                    val = ROL<16>(m_State.m_flags, val, 1);
                     break;
                 case 1: // ror
-                    val = ROR16(val, 1);
+                    val = ROR<16>(m_State.m_flags, val, 1);
                     break;
                 case 2: // rcl
-                    val = RCL16(val, 1);
+                    val = RCL<16>(m_State.m_flags, val, 1);
                     break;
                 case 3: // rcr
-                    val = RCR16(val, 1);
+                    val = RCR<16>(m_State.m_flags, val, 1);
                     break;
                 case 4: // shl
-                    val = SHL16(val, 1);
+                    val = SHL<16>(m_State.m_flags, val, 1);
                     break;
                 case 5: // shr
-                    val = SHR16(val, 1);
+                    val = SHR<16>(m_State.m_flags, val, 1);
                     break;
                 case 6: // undefined
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR16(val, 1);
+                    val = SAR<16>(m_State.m_flags, val, 1);
                     break;
             }
             WriteEA16(m_DecodeState, val);
             break;
         }
         case 0xd2: /* GRP2 Eb CL */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             uint8_t val = ReadEA8(m_DecodeState);
             uint8_t cnt = m_State.m_cx & 0xff;
             switch (op) {
                 case 0: // rol
-                    val = ROL8(val, cnt);
+                    val = ROL<8>(m_State.m_flags, val, cnt);
                     break;
                 case 1: // ror
-                    val = ROR8(val, cnt);
+                    val = ROR<8>(m_State.m_flags, val, cnt);
                     break;
                 case 2: // rcl
-                    val = RCL8(val, cnt);
+                    val = RCL<8>(m_State.m_flags, val, cnt);
                     break;
                 case 3: // rcr
-                    val = RCR8(val, cnt);
+                    val = RCR<8>(m_State.m_flags, val, cnt);
                     break;
                 case 4: // shl
-                    val = SHL8(val, cnt);
+                    val = SHL<8>(m_State.m_flags, val, cnt);
                     break;
                 case 5: // shr
-                    val = SHR8(val, cnt);
+                    val = SHR<8>(m_State.m_flags, val, cnt);
                     break;
                 case 6: // undefined
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR8(val, cnt);
+                    val = SAR<8>(m_State.m_flags, val, cnt);
                     break;
             }
             WriteEA8(m_DecodeState, val);
             break;
         }
         case 0xd3: /* GRP2 Ev CL */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             uint16_t val = ReadEA16(m_DecodeState);
             uint8_t cnt = m_State.m_cx & 0xff;
             switch (op) {
                 case 0: // rol
-                    val = ROL16(val, cnt);
+                    val = ROL<16>(m_State.m_flags, val, cnt);
                     break;
                 case 1: // ror
-                    val = ROR16(val, cnt);
+                    val = ROR<16>(m_State.m_flags, val, cnt);
                     break;
                 case 2: // rcl
-                    val = RCL16(val, cnt);
+                    val = RCL<16>(m_State.m_flags, val, cnt);
                     break;
                 case 3: // rcr
-                    val = RCR16(val, cnt);
+                    val = RCR<16>(m_State.m_flags, val, cnt);
                     break;
                 case 4: // shl
-                    val = SHL16(val, cnt);
+                    val = SHL<16>(m_State.m_flags, val, cnt);
                     break;
                 case 5: // shr
-                    val = SHR16(val, cnt);
+                    val = SHR<16>(m_State.m_flags, val, cnt);
                     break;
                 case 6: // undefined
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR16(val, cnt);
+                    val = SAR<16>(m_State.m_flags, val, cnt);
                     break;
             }
             WriteEA16(m_DecodeState, val);
             break;
-            break;
         }
         case 0xd4: /* AAM I0 */ {
-            TODO;
+            todo();
             break;
         }
         case 0xd5: /* AAD I0 */ {
-            TODO;
+            todo();
             break;
         }
         case 0xd6: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xd7: /* XLAT */ {
-            int seg = HandleSegmentOverride(SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax = (m_State.m_ax & 0xff00) |
                            m_Memory.ReadByte(MakeAddr(seg, m_State.m_bx + m_State.m_ax & 0xff));
             break;
         }
         case 0xd8: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xd9: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xda: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xdb: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xdc: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xdd: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xde: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xdf: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xe0: /* LOOPNZ Jb */ {
             m_State.m_cx--;
-            DO_COND_JUMP(!FlagZero() && m_State.m_cx != 0);
+            handleConditionalJump(!FlagZero(m_State.m_flags) && m_State.m_cx != 0);
             break;
         }
         case 0xe1: /* LOOPZ Jb */ {
             m_State.m_cx--;
-            DO_COND_JUMP(FlagZero() && m_State.m_cx != 0);
+            handleConditionalJump(FlagZero(m_State.m_flags) && m_State.m_cx != 0);
             break;
         }
         case 0xe2: /* LOOP Jb */ {
             m_State.m_cx--;
-            DO_COND_JUMP(m_State.m_cx != 0);
+            handleConditionalJump(m_State.m_cx != 0);
             break;
         }
         case 0xe3: /* JCXZ Jb */ {
-            DO_COND_JUMP(m_State.m_cx == 0);
+            handleConditionalJump(m_State.m_cx == 0);
             break;
         }
         case 0xe4: /* IN AL Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_ax = (m_State.m_ax & 0xff00) | m_IO.In8(imm);
             break;
         }
         case 0xe5: /* IN eAX Ib */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_State.m_ax = m_IO.In16(imm);
             break;
         }
         case 0xe6: /* OUT Ib AL */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_IO.Out8(imm, m_State.m_ax & 0xff);
             break;
         }
         case 0xe7: /* OUT Ib eAX */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             m_IO.Out16(imm, m_State.m_ax & 0xff);
             break;
         }
         case 0xe8: /* CALL Jv */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             Push16(m_State.m_ip);
-            RelativeJump16(imm);
+            RelativeJump16(m_State.m_ip, imm);
             break;
         }
         case 0xe9: /* JMP Jv */ {
-            GET_IMM16;
-            RelativeJump16(imm);
+            const auto imm = getImm16();
+            RelativeJump16(m_State.m_ip, imm);
             break;
         }
         case 0xea: /* JMP Ap */ {
-            m_State.m_ip = IMM16;
-            m_State.m_cs = IMM16;
+            m_State.m_ip = getImm16();
+            m_State.m_cs = getImm16();
             break;
         }
         case 0xeb: /* JMP Jb */ {
-            DO_COND_JUMP(true);
+            handleConditionalJump(true);
             break;
         }
         case 0xec: /* IN AL DX */ {
@@ -1543,11 +2052,11 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xf0: /* LOCK */ {
-            TODO; /* XXX Should we? */
+            todo(); /* XXX Should we? */
             break;
         }
         case 0xf1: /* -- */ {
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
         }
         case 0xf2: /* REPNZ */ {
@@ -1559,7 +2068,7 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xf4: /* HLT */ {
-            TODO;
+            todo();
             break;
         }
         case 0xf5: /* CMC */ {
@@ -1567,71 +2076,75 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xf6: /* GRP3a Eb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: /* TEST Eb Ib */ {
-                    GET_IMM8;
-                    AND8(ReadEA8(m_DecodeState), imm);
+                    const auto imm = getImm8();
+                    [[maybe_unused]] auto _ = And8(m_State.m_flags, ReadEA8(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
                 case 2: /* NOT */
                     WriteEA8(m_DecodeState, 0xFF - ReadEA8(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA8(m_DecodeState, SUB8(0, ReadEA8(m_DecodeState)));
+                    WriteEA8(m_DecodeState, Sub8(m_State.m_flags, 0, ReadEA8(m_DecodeState)));
                     break;
                 case 4: /* MUL */
-                    MUL8(ReadEA8(m_DecodeState));
+                    Mul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
                     break;
                 case 5: /* IMUL */
-                    IMUL8(ReadEA8(m_DecodeState));
+                    Imul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
                     break;
                 case 6: /* DIV */
-                    DIV8(ReadEA8(m_DecodeState));
+                    if (Div8(m_State.m_ax, ReadEA8(m_DecodeState)))
+                        SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
-                    IDIV8(ReadEA8(m_DecodeState));
+                    if (Idiv8(m_State.m_ax, m_State.m_dx, ReadEA8(m_DecodeState)))
+                        SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
             break;
         }
         case 0xf7: /* GRP3b Ev */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: /* TEST Eb Iw */ {
-                    GET_IMM16;
-                    AND16(ReadEA16(m_DecodeState), imm);
+                    const auto imm = getImm16();
+                    [[maybe_unused]] auto _ = And16(m_State.m_flags, ReadEA16(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
                 case 2: /* NOT */
                     WriteEA16(m_DecodeState, 0xFFFF - ReadEA16(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA16(m_DecodeState, SUB16(0, ReadEA16(m_DecodeState)));
+                    WriteEA16(m_DecodeState, Sub16(m_State.m_flags, 0, ReadEA16(m_DecodeState)));
                     break;
                 case 4: /* MUL */
-                    MUL16(ReadEA16(m_DecodeState));
+                    Mul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
                     break;
                 case 5: /* IMUL */
-                    IMUL16(ReadEA16(m_DecodeState));
+                    Imul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
                     break;
                 case 6: /* DIV */
-                    DIV16(ReadEA16(m_DecodeState));
+                    if (Div16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
+                        SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
-                    IDIV16(ReadEA16(m_DecodeState));
+                    if (Idiv16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
+                        SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
             break;
@@ -1661,36 +2174,36 @@ int CPUx86::RunInstruction()
             break;
         }
         case 0xfe: /* GRP4 Eb */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
             uint8_t val = ReadEA8(m_DecodeState);
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // inc
-                    WriteEA8(m_DecodeState, INC8(val));
+                    WriteEA8(m_DecodeState, Inc8(m_State.m_flags, val));
                     break;
                 case 1: // dec
-                    WriteEA8(m_DecodeState, DEC8(val));
+                    WriteEA8(m_DecodeState, Dec8(m_State.m_flags, val));
                     break;
                 default: // invalid
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
             }
             break;
         }
         case 0xff: /* GRP5 Ev */ {
-            GET_MODRM;
+            const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
             uint16_t val = ReadEA16(m_DecodeState);
-            unsigned int op = MODRM_XXX(modrm);
+            unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: /* INC eV */
-                    WriteEA16(m_DecodeState, INC16(val));
+                    WriteEA16(m_DecodeState, Inc16(m_State.m_flags, val));
                     break;
                 case 1: /* DEC eV */
-                    WriteEA16(m_DecodeState, DEC16(val));
+                    WriteEA16(m_DecodeState, Dec16(m_State.m_flags, val));
                     break;
                 case 2: /* CALL Ev */
                     Push16(m_State.m_ip);
@@ -1717,7 +2230,7 @@ int CPUx86::RunInstruction()
                     Push16(val);
                     break;
                 case 7: /* undefined */
-                    INVALID_OPCODE;
+                    invalidOpcode();
                     break;
             }
             break;
@@ -1727,16 +2240,19 @@ int CPUx86::RunInstruction()
 
 void CPUx86::Handle0FPrefix()
 {
+    auto getImm8 = [&]() { return GetNextOpcode(); };
+    auto invalidOpcode = []() { TRACE("invalidOpcode 0F..\n"); std::abort(); };
+
     uint8_t opcode = GetNextOpcode();
     TRACE("cs:ip=%04x:%04x opcode 0x0f 0x%02x\n", m_State.m_cs, m_State.m_ip - 1, opcode);
     switch (opcode) {
         case 0x34: /* SYSENTER - (ab)used for interrupt dispatch */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             m_Vectors.Invoke(*this, imm);
             break;
         }
         default: /* undefined */
-            INVALID_OPCODE;
+            invalidOpcode();
             break;
     }
 }
@@ -1753,17 +2269,24 @@ CPUx86::addr_t CPUx86::MakeAddr(uint16_t seg, uint16_t off)
 
 void CPUx86::DecodeEA(uint8_t modrm, DecodeState& oState)
 {
-    uint8_t mod = (modrm & 0xc0) >> 6;
-    uint8_t rm = modrm & 7;
-    oState.m_reg = MODRM_XXX(modrm);
+    auto getImm8 = [&]() { return GetNextOpcode(); };
+    auto getImm16 = [&]() -> uint16_t {
+        uint16_t a = GetNextOpcode();
+        uint16_t b = GetNextOpcode();
+        return a | (b << 8);
+    };
+
+    const uint8_t mod = (modrm & 0xc0) >> 6;
+    const uint8_t rm = modrm & 7;
+    oState.m_reg = ModRm_XXX(modrm);
 
     switch (mod) {
         case 0: /* DISP=0*, disp-low and disp-hi are absent */ {
             if (rm == 6) {
                 // except if mod==00 and rm==110, then EA = disp-hi; disp-lo
-                GET_IMM16;
+                const auto imm = getImm16();
                 oState.m_type = DecodeState::T_MEM;
-                oState.m_seg = HandleSegmentOverride(SEG_DS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_DS);
                 oState.m_off = imm;
                 oState.m_disp = 0;
                 return;
@@ -1773,17 +2296,18 @@ void CPUx86::DecodeEA(uint8_t modrm, DecodeState& oState)
             break;
         }
         case 1: /* DISP=disp-low sign-extended to 16-bits, disp-hi absent */ {
-            GET_IMM8;
+            const auto imm = getImm8();
             oState.m_disp = (addr_t)((int16_t)imm);
             break;
         }
         case 2: /* DISP=disp-hi:disp-lo */ {
-            GET_IMM16;
+            const auto imm = getImm16();
             oState.m_disp = imm;
             break;
         }
         case 3: /* rm treated as reg field */ {
             oState.m_disp = 0;
+            break;
         }
     }
 
@@ -1791,35 +2315,35 @@ void CPUx86::DecodeEA(uint8_t modrm, DecodeState& oState)
         oState.m_type = DecodeState::T_MEM;
         switch (rm) {
             case 0: // (bx) + (si) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_DS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_DS);
                 oState.m_off = m_State.m_bx + m_State.m_si;
                 break;
             case 1: // (bx) + (di) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_DS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_DS);
                 oState.m_off = m_State.m_bx + m_State.m_di;
                 break;
             case 2: // (bp) + (si) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_SS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_SS);
                 oState.m_off = m_State.m_bp + m_State.m_si;
                 break;
             case 3: // (bp) + (di) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_SS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_SS);
                 oState.m_off = m_State.m_bp + m_State.m_di;
                 break;
             case 4: // (si) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_DS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_DS);
                 oState.m_off = m_State.m_si;
                 break;
             case 5: // (di) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_DS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_DS);
                 oState.m_off = m_State.m_di;
                 break;
             case 6: // (bp) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_SS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_SS);
                 oState.m_off = m_State.m_bp;
                 break;
             case 7: // (bx) + disp
-                oState.m_seg = HandleSegmentOverride(SEG_DS);
+                oState.m_seg = HandleSegmentOverride(m_State, SEG_DS);
                 oState.m_off = m_State.m_bx;
                 break;
         }
@@ -1858,7 +2382,7 @@ uint16_t CPUx86::ReadEA16(const DecodeState& oState)
             seg_base = m_State.m_ss;
             break;
         default:
-            assert(0); // what's this?
+            std::abort();
     }
 
     TRACE(
@@ -1889,7 +2413,7 @@ void CPUx86::WriteEA16(const DecodeState& oState, uint16_t value)
             seg_base = m_State.m_ss;
             break;
         default:
-            assert(0); // what's this?
+            std::abort();
     }
 
     TRACE("write(16) @ %x:%x val %x\n", seg_base, oState.m_off + oState.m_disp, value);
@@ -1919,7 +2443,7 @@ uint8_t CPUx86::ReadEA8(const DecodeState& oState)
             seg_base = m_State.m_ss;
             break;
         default:
-            assert(0); // what's this?
+            std::abort();
     }
 
     TRACE("read(8) @ %x:%x\n", seg_base, oState.m_off + oState.m_disp);
@@ -1950,7 +2474,7 @@ void CPUx86::WriteEA8(const DecodeState& oState, uint8_t val)
             seg_base = m_State.m_ss;
             break;
         default:
-            assert(0); // what's this?
+            std::abort();
     }
 
     TRACE("write(8) @ %x:%x val %\n", seg_base, oState.m_off + oState.m_disp, val);
@@ -1977,7 +2501,7 @@ uint16_t& CPUx86::GetReg16(int n)
         case 7:
             return m_State.m_di;
     }
-    assert(0); // what's this?
+    std::abort();
 }
 
 uint16_t& CPUx86::GetSReg16(int n)
@@ -1992,7 +2516,7 @@ uint16_t& CPUx86::GetSReg16(int n)
         case SEG_DS:
             return m_State.m_ds;
     }
-    assert(0); // what's this?
+    std::abort();
 }
 
 uint16_t& CPUx86::GetReg8(int n, unsigned int& shift)
@@ -2008,8 +2532,7 @@ uint16_t& CPUx86::GetReg8(int n, unsigned int& shift)
         case 3:
             return m_State.m_bx;
     }
-
-    /* NOTREACHED */
+    std::abort();
 }
 
 void CPUx86::SetReg8(uint16_t& reg, unsigned int shift, uint8_t val)
@@ -2046,427 +2569,10 @@ void CPUx86::State::Dump()
 
 void CPUx86::Dump() { m_State.Dump(); }
 
-uint8_t CPUx86::OR8(uint8_t a, uint8_t b)
-{
-    uint8_t op1 = a | b;
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP8(op1);
-    return op1;
-}
-
-uint16_t CPUx86::OR16(uint16_t a, uint16_t b)
-{
-    uint16_t op1 = a | b;
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP16(op1);
-    return op1;
-}
-
-uint8_t CPUx86::AND8(uint8_t a, uint8_t b)
-{
-    uint8_t op1 = a & b;
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP8(op1);
-    return op1;
-}
-
-uint16_t CPUx86::AND16(uint16_t a, uint16_t b)
-{
-    uint16_t op1 = a & b;
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP16(op1);
-    return op1;
-}
-
-uint8_t CPUx86::XOR8(uint8_t a, uint8_t b)
-{
-    uint8_t op1 = a ^ b;
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP8(op1);
-    return op1;
-}
-
-uint16_t CPUx86::XOR16(uint16_t a, uint16_t b)
-{
-    uint16_t op1 = a ^ b;
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP16(op1);
-    return op1;
-}
-
-void CPUx86::SetFlagsArith8(uint8_t a, uint8_t b, uint16_t res)
-{
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP8(res);
-    if (res & 0xff00)
-        m_State.m_flags |= State::FLAG_CF;
-    if ((a ^ res) & (a ^ b) & 0x80)
-        m_State.m_flags |= State::FLAG_OF;
-    if ((a ^ b ^ res) & 0x10)
-        m_State.m_flags |= State::FLAG_AF;
-}
-
-void CPUx86::SetFlagsArith16(uint16_t a, uint16_t b, uint32_t res)
-{
-    m_State.m_flags &=
-        ~(State::FLAG_OF | State::FLAG_SF | State::FLAG_ZF | State::FLAG_PF | State::FLAG_CF);
-    SetFlagsSZP16(res);
-    if (res & 0xffff0000)
-        m_State.m_flags |= State::FLAG_CF;
-    if ((a ^ res) & (a ^ b) & 0x8000)
-        m_State.m_flags |= State::FLAG_OF;
-    if ((a ^ b ^ res) & 0x10)
-        m_State.m_flags |= State::FLAG_AF;
-}
-
-uint8_t CPUx86::ADD8(uint8_t a, uint8_t b)
-{
-    uint16_t res = a + b;
-    SetFlagsArith8(a, b, res);
-    return res & 0xff;
-}
-
-uint16_t CPUx86::ADD16(uint16_t a, uint16_t b)
-{
-    uint32_t res = a + b;
-    SetFlagsArith16(a, b, res);
-    return res & 0xffff;
-}
-
-uint8_t CPUx86::ADC8(uint8_t a, uint8_t b)
-{
-    uint16_t res = a + b + FlagCarry() ? 1 : 0;
-    SetFlagsArith8(a, b, res);
-    return res & 0xff;
-}
-
-uint16_t CPUx86::ADC16(uint16_t a, uint16_t b)
-{
-    uint32_t res = a + b + FlagCarry() ? 1 : 0;
-    SetFlagsArith16(a, b, res);
-    return res & 0xffff;
-}
-
-uint8_t CPUx86::SUB8(uint8_t a, uint8_t b)
-{
-    uint16_t res = a - b;
-    SetFlagsArith8(a, b, res);
-    return res & 0xff;
-}
-
-uint16_t CPUx86::SUB16(uint16_t a, uint16_t b)
-{
-    uint32_t res = a - b;
-    SetFlagsArith16(a, b, res);
-    return res & 0xffff;
-}
-
-uint8_t CPUx86::SBB8(uint8_t a, uint8_t b)
-{
-    uint16_t res = a - b - FlagCarry() ? 1 : 0;
-    SetFlagsArith8(a, b, res);
-    return res & 0xff;
-}
-
-uint16_t CPUx86::SBB16(uint16_t a, uint16_t b)
-{
-    uint32_t res = a - b - FlagCarry() ? 1 : 0;
-    SetFlagsArith16(a, b, res);
-    return res & 0xffff;
-}
-
-uint8_t CPUx86::INC8(uint8_t a)
-{
-    bool carry = FlagCarry();
-    uint8_t res = ADD8(a, 1);
-    if (carry)
-        m_State.m_flags |= State::FLAG_CF;
-    else
-        m_State.m_flags &= ~State::FLAG_CF;
-    return res;
-}
-
-uint16_t CPUx86::INC16(uint16_t a)
-{
-    bool carry = FlagCarry();
-    uint16_t res = ADD16(a, 1);
-    if (carry)
-        m_State.m_flags |= State::FLAG_CF;
-    else
-        m_State.m_flags &= ~State::FLAG_CF;
-    return res;
-}
-
-uint8_t CPUx86::DEC8(uint8_t a)
-{
-    bool carry = FlagCarry();
-    uint8_t res = SUB8(a, 1);
-    if (carry)
-        m_State.m_flags |= State::FLAG_CF;
-    else
-        m_State.m_flags &= ~State::FLAG_CF;
-    return res;
-}
-
-uint16_t CPUx86::DEC16(uint16_t a)
-{
-    bool carry = FlagCarry();
-    uint16_t res = SUB16(a, 1);
-    if (carry)
-        m_State.m_flags |= State::FLAG_CF;
-    else
-        m_State.m_flags &= ~State::FLAG_CF;
-    return res;
-}
-
-#define EMIT_ROL(BITS)                                                                  \
-    uint##BITS##_t CPUx86::ROL##BITS(uint##BITS##_t v, uint8_t n)                       \
-    {                                                                                   \
-        uint8_t cnt = n % BITS;                                                         \
-        if (cnt > 0) {                                                                  \
-            v = (v << cnt) | (v >> (BITS - cnt));                                       \
-            SetFlag(State::FLAG_CF, v & 1);                                             \
-        }                                                                               \
-        if (n == 1)                                                                     \
-            SetFlag(State::FLAG_OF, ((v & (1 << (BITS - 1))) ^ (FlagCarry() ? 1 : 0))); \
-    }
-
-#define EMIT_ROR(BITS)                                                                  \
-    uint##BITS##_t CPUx86::ROR##BITS(uint##BITS##_t v, uint8_t n)                       \
-    {                                                                                   \
-        uint8_t cnt = n % BITS;                                                         \
-        if (cnt > 0) {                                                                  \
-            v = (v >> cnt) | (v << (BITS - cnt));                                       \
-            SetFlag(State::FLAG_CF, v&(1 << (BITS - 1)));                               \
-        }                                                                               \
-        if (n == 1)                                                                     \
-            SetFlag(State::FLAG_OF, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2)))); \
-    }
-
-#define EMIT_RCL(BITS)                                                                         \
-    uint##BITS##_t CPUx86::RCL##BITS(uint##BITS##_t v, uint8_t n)                              \
-    {                                                                                          \
-        uint8_t cnt = (n & 0x1f) % (BITS + 1);                                                 \
-        if (cnt > 0) {                                                                         \
-            uint8_t tmp =                                                                      \
-                (v << cnt) | ((FlagCarry() ? 1 : 0) << (cnt - 1)) | (v >> ((BITS + 1) - cnt)); \
-            SetFlag(State::FLAG_CF, (v >> (BITS - cnt)) & 1);                                  \
-            v = tmp;                                                                           \
-        }                                                                                      \
-        if (n == 1)                                                                            \
-            SetFlag(State::FLAG_OF, ((v & (1 << (BITS - 1))) ^ (FlagCarry() ? 1 : 0)));        \
-        return v;                                                                              \
-    }
-
-#define EMIT_RCR(BITS)                                                                        \
-    uint##BITS##_t CPUx86::RCR##BITS(uint##BITS##_t v, uint8_t n)                             \
-    {                                                                                         \
-        if (n == 1)                                                                           \
-            SetFlag(State::FLAG_OF, ((v & (1 << (BITS - 1))) ^ (FlagCarry() ? 1 : 0)));       \
-        uint8_t cnt = (n & 0x1f) % (BITS + 1);                                                \
-        if (cnt == 0)                                                                         \
-            return v;                                                                         \
-        uint8_t tmp =                                                                         \
-            (v >> cnt) | ((FlagCarry() ? 1 : 0)) << (BITS - cnt) | (v << ((BITS + 1) - cnt)); \
-        SetFlag(State::FLAG_CF, (v >> (cnt - 1) & 1));                                        \
-        return tmp;                                                                           \
-    }
-
-#define EMIT_SHL(BITS)                                            \
-    uint##BITS##_t CPUx86::SHL##BITS(uint##BITS##_t v, uint8_t n) \
-    {                                                             \
-        uint8_t cnt = n & 0x1f;                                   \
-        if (cnt < BITS) {                                         \
-            if (cnt > 0)                                          \
-                SetFlag(State::FLAG_CF, v&(1 << (BITS - cnt)));   \
-            return v << cnt;                                      \
-        } else {                                                  \
-            SetFlag(State::FLAG_CF, false);                       \
-            return 0;                                             \
-        }                                                         \
-    }
-
-#define EMIT_SHR(BITS)                                                                  \
-    uint##BITS##_t CPUx86::SHR##BITS(uint##BITS##_t v, uint8_t n)                       \
-    {                                                                                   \
-        uint8_t cnt = n & 0x1f;                                                         \
-        if (cnt < BITS) {                                                               \
-            if (cnt > 0)                                                                \
-                SetFlag(State::FLAG_CF, v&(1 << cnt));                                  \
-            v >>= cnt;                                                                  \
-        } else {                                                                        \
-            v = 0;                                                                      \
-            SetFlag(State::FLAG_CF, false);                                             \
-        }                                                                               \
-        if (n == 1)                                                                     \
-            SetFlag(State::FLAG_OF, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2)))); \
-        SetFlagsSZP##BITS(v);                                                           \
-        return v;                                                                       \
-    }
-
-#define EMIT_SAR(BITS)                                            \
-    uint##BITS##_t CPUx86::SAR##BITS(uint##BITS##_t v, uint8_t n) \
-    {                                                             \
-        uint8_t cnt = n & 0x1f;                                   \
-        if (cnt > 0)                                              \
-            SetFlag(State::FLAG_CF, v&(1 << cnt));                \
-        if (cnt < BITS) {                                         \
-            if (v & (1 << (BITS - 1))) {                          \
-                v = (v >> cnt) | (0xff << (BITS - cnt));          \
-            } else {                                              \
-                v >>= cnt;                                        \
-            }                                                     \
-        } else /* cnt >= BITS */ {                                \
-            if (v & (1 << (BITS - 1))) {                          \
-                SetFlag(State::FLAG_CF, true);                    \
-                v = (1 << BITS) - 1;                              \
-            } else {                                              \
-                SetFlag(State::FLAG_CF, false);                   \
-                v = 0;                                            \
-            }                                                     \
-        }                                                         \
-        if (n == 1)                                               \
-            SetFlag(State::FLAG_OF, 0);                           \
-        SetFlagsSZP##BITS(v);                                     \
-        return v;                                                 \
-    }
-
-EMIT_ROL(8)
-EMIT_ROL(16)
-EMIT_ROR(8)
-EMIT_ROR(16)
-EMIT_RCL(8)
-EMIT_RCL(16)
-EMIT_RCR(8)
-EMIT_RCR(16)
-EMIT_SHL(8)
-EMIT_SHL(16)
-EMIT_SHR(8)
-EMIT_SHR(16)
-EMIT_SAR(8)
-EMIT_SAR(16)
-
-void CPUx86::SetFlagsSZP8(uint8_t n)
-{
-    if (n & 0x80)
-        m_State.m_flags |= State::FLAG_SF;
-    if (n == 0)
-        m_State.m_flags |= State::FLAG_ZF;
-    register uint8_t pf =
-        ~((n & 0x80) ^ (n & 0x40) ^ (n & 0x20) ^ (n & 0x10) ^ (n & 0x08) ^ (n & 0x04) ^ (n & 0x02) ^
-          (n & 0x01));
-    if (pf & 1)
-        m_State.m_flags |= State::FLAG_PF;
-}
-
-void CPUx86::SetFlag(uint16_t flag, bool set)
-{
-    if (set)
-        m_State.m_flags |= flag;
-    else
-        m_State.m_flags &= ~flag;
-}
-
-void CPUx86::SetFlagsSZP16(uint16_t n)
-{
-    if (n & 0x8000)
-        m_State.m_flags |= State::FLAG_SF;
-    if (n == 0)
-        m_State.m_flags |= State::FLAG_ZF;
-    register uint8_t pf =
-        ~((n & 0x80) ^ (n & 0x40) ^ (n & 0x20) ^ (n & 0x10) ^ (n & 0x08) ^ (n & 0x04) ^ (n & 0x02) ^
-          (n & 0x01));
-    if (pf & 1)
-        m_State.m_flags |= State::FLAG_PF;
-}
-
-void CPUx86::MUL8(uint8_t a)
-{
-    m_State.m_flags &= ~(State::FLAG_CF | State::FLAG_OF);
-    m_State.m_ax = (m_State.m_ax & 0xff) * (uint16_t)a;
-    if (m_State.m_ax >= 0x100)
-        m_State.m_flags |= (State::FLAG_CF | State::FLAG_OF);
-}
-
-void CPUx86::MUL16(uint16_t a)
-{
-    m_State.m_flags &= ~(State::FLAG_CF | State::FLAG_OF);
-    m_State.m_dx = (m_State.m_ax * a) >> 16;
-    m_State.m_ax = (m_State.m_ax * a) & 0xffff;
-    if (m_State.m_dx != 0)
-        m_State.m_flags |= (State::FLAG_CF | State::FLAG_OF);
-}
-
-void CPUx86::IMUL8(uint8_t a)
-{
-    m_State.m_flags &= ~(State::FLAG_CF | State::FLAG_OF);
-    m_State.m_ax = (m_State.m_ax & 0xff) * (uint16_t)a;
-    uint8_t ah = (m_State.m_ax & 0xff00) >> 8;
-    SetFlag((State::FLAG_CF | State::FLAG_OF), ah == 0 || ah == 0xff);
-}
-
-void CPUx86::IMUL16(uint16_t a)
-{
-    m_State.m_flags &= ~(State::FLAG_CF | State::FLAG_OF);
-    uint32_t res = (uint32_t)m_State.m_ax * (uint32_t)a;
-    m_State.m_dx = res >> 16;
-    m_State.m_ax = res & 0xffff;
-    SetFlag((State::FLAG_CF | State::FLAG_OF), m_State.m_dx == 0 || m_State.m_dx == 0xffff);
-}
-
-void CPUx86::DIV8(uint8_t a)
-{
-    if (a == 0)
-        SignalInterrupt(0);
-    if ((m_State.m_ax / a) > 0xff)
-        SignalInterrupt(0);
-    uint16_t ax = m_State.m_ax;
-    m_State.m_ax = ((ax % a) & 0xff) << 8 | ((ax / a) & 0xff);
-}
-
-void CPUx86::DIV16(uint16_t a)
-{
-    if (a == 0)
-        SignalInterrupt(INT_DIV_BY_ZERO);
-    uint32_t v = (m_State.m_dx << 16) | m_State.m_ax;
-    if ((v / a) > 0xffff)
-        SignalInterrupt(INT_DIV_BY_ZERO);
-    m_State.m_ax = (v / a) & 0xffff;
-    m_State.m_dx = (v % a) & 0xffff;
-}
-
-void CPUx86::IDIV8(uint8_t a)
-{
-    if (a == 0)
-        SignalInterrupt(0);
-    int8_t res = m_State.m_ax / a;
-    if (((int16_t)m_State.m_ax > 0 && res > 0x7f) || ((int16_t)m_State.m_ax < 0 && res < 0x80))
-        SignalInterrupt(INT_DIV_BY_ZERO);
-    uint16_t ax = m_State.m_ax;
-    m_State.m_ax = ((ax % a) & 0xff) << 8 | ((ax / a) & 0xff);
-}
-
-void CPUx86::IDIV16(uint16_t a)
-{
-    if (a == 0)
-        SignalInterrupt(INT_DIV_BY_ZERO);
-    int32_t v = (m_State.m_dx << 16) | m_State.m_ax;
-    if ((v > 0 && (v / a) > 0x7ffff) || (v < 0 && (v / a) < 0x80000))
-        SignalInterrupt(INT_DIV_BY_ZERO);
-    m_State.m_ax = (v / a) & 0xffff;
-    m_State.m_dx = (v % a) & 0xffff;
-}
-
 void CPUx86::SignalInterrupt(uint8_t no)
 {
-    abort(); // TODO
+    TRACE("SignalInterrupt 0x%x\n", no);
+    std::abort(); // TODO
 }
 
 void CPUx86::HandleInterrupt(uint8_t no)
@@ -2475,7 +2581,7 @@ void CPUx86::HandleInterrupt(uint8_t no)
     uint16_t off = m_Memory.ReadWord(addr + 0);
 
     // Push flags and return address
-    Push16(m_State.m_flags | State::FLAG_ON);
+    Push16(m_State.m_flags);
     Push16(m_State.m_cs);
     Push16(m_State.m_ip);
 
@@ -2507,36 +2613,14 @@ void CPUx86::HandleInterrupt(uint8_t no)
 		uint16_t ah = (m_State.m_ax & 0xff00) >> 8;
 		switch(ah) {
 			case 1: // check for key
-				SetFlag(State::FLAG_ZF, true);
+				SetFlag<State::FLAG_ZF>(m_State.m_flags, true);
 				break;
 			default:
-				TODO;
+				TRACE("HandleInterrupt %d func %d\n", no, ah);
 		}
 		return;
 	}
 #endif
 }
 
-void CPUx86::RelativeJump8(uint8_t n)
-{
-    if (n & 0x80)
-        m_State.m_ip -= 0x100 - n;
-    else
-        m_State.m_ip += (uint16_t)n;
-}
-
-void CPUx86::RelativeJump16(uint16_t n)
-{
-    if (n & 0x8000)
-        m_State.m_ip -= 0x10000 - n;
-    else
-        m_State.m_ip += n;
-}
-
-int CPUx86::HandleSegmentOverride(int def)
-{
-    if ((m_State.m_prefix & State::PREFIX_SEG) == 0)
-        return def;
-    m_State.m_prefix &= ~State::PREFIX_SEG;
-    return m_State.m_seg_override;
-}
+/* vim:set ts=4 sw=4: */
