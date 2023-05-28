@@ -3,20 +3,21 @@
 
 #include <stdint.h>
 
-class IO {
-public:
-	IO();
-	~IO();
+class IO
+{
+  public:
+    IO();
+    ~IO();
 
-	typedef uint16_t port_t;
+    typedef uint16_t port_t;
 
-	void Reset();
+    void Reset();
 
-	void Out8(port_t port, uint8_t val);
-	void Out16(port_t port, uint16_t val);
+    void Out8(port_t port, uint8_t val);
+    void Out16(port_t port, uint16_t val);
 
-	uint8_t In8(port_t port);
-	uint16_t In16(port_t port);
+    uint8_t In8(port_t port);
+    uint16_t In16(port_t port);
 };
 
 #endif /* __IO_H__ */

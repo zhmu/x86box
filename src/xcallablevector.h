@@ -3,9 +3,10 @@
 
 #include "cpux86.h"
 
-class XCallableVector {
-public:
-	virtual void InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState) = 0;
+class XCallableVector
+{
+  public:
+    virtual void InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState) = 0;
 };
 
 #endif /* __XCALLABLEVECTOR_H__ */
