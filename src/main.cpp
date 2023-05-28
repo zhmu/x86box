@@ -4,6 +4,7 @@
 #include "file.h"
 #include "io.h"
 #include "memory.h"
+#include "keyboard.h"
 #include "vectors.h"
 #include "vga.h"
 #include <stdio.h>
@@ -16,6 +17,7 @@ CPUx86 cpu(memory, io, vectors);
 HostIO hostio;
 DOS dos(cpu, memory, vectors);
 VGA vga(memory, hostio, vectors);
+Keyboard keyboard(memory, hostio, vectors);
 
 static bool load_to_memory(const char* fname, uint32_t base)
 {
@@ -46,6 +48,7 @@ int main(int argc, char** argv)
     dos.Reset();
     cpu.Reset();
     vga.Reset();
+    keyboard.Reset();
 
     if (!load_to_memory("../images/snake.bin", 0x10100))
         abort();
