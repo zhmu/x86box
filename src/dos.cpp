@@ -7,7 +7,6 @@
 #include "cpux86.h"
 #include "memory.h"
 #include "vectors.h"
-#include "xfile.h"
 
 #define TRACE_INT(x...) fprintf(stderr, "[dos-int] " x)
 #define TRACE_EXE(x...) fprintf(stderr, "[dos-exe] " x)

@@ -10,7 +10,6 @@
 class CPUx86;
 class Memory;
 class Vectors;
-class XFile;
 
 //! \brief Implements MS-DOS compatible services
 class DOS : public XCallableVector

@@ -1,7 +1,6 @@
 #include "cpux86.h"
 #include "dos.h"
 #include "hostio.h"
-#include "file.h"
 #include "io.h"
 #include "memory.h"
 #include "keyboard.h"
