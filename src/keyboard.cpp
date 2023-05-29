@@ -32,13 +32,13 @@ void Keyboard::Reset()
 #endif
 }
 
-void Keyboard::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
+void Keyboard::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
 {
     const uint8_t ah = (oState.m_ax & 0xff00) >> 8;
     switch (ah) {
         case 0x01: {
             TRACE_INT("ah=%02x: check for key\n", ah);
-            oState.m_flags |= CPUx86::State::FLAG_ZF;
+            oState.m_flags |= cpu::flag::ZF;
             break;
         }
         default: /* what's this? */

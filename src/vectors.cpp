@@ -38,12 +38,12 @@ void Vectors::Invoke(CPUx86& oCPU, uint8_t no)
     assert(it != m_Map.end()); // vector not registered if this fails
 
     // First of all, invoke the handler
-    CPUx86::State& oState = oCPU.GetState();
-    it->second.InvokeVector(no, oCPU, oState);
+    auto& state = oCPU.GetState();
+    it->second.InvokeVector(no, oCPU, state);
 
     /*
      * XXX We assume a PUSHF has been executed; overwrite the value in memory with
      * the new flags
      */
-    oCPU.GetMemory().WriteWord(CPUx86::MakeAddr(oState.m_ss, oState.m_sp + 4), oState.m_flags);
+    oCPU.GetMemory().WriteWord(CPUx86::MakeAddr(state.m_ss, state.m_sp + 4), state.m_flags);
 }

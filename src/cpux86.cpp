@@ -52,25 +52,6 @@ namespace
     template<unsigned int BITS>
     using UintOf = UintOfImpl<BITS>::type;
 
-    template<uint16_t Flag>
-    [[nodiscard]] constexpr bool IsFlagSet(uint16_t flags) { return (flags & Flag) != 0; };
-
-    [[nodiscard]] constexpr bool FlagCarry(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_CF>(flags); }
-    [[nodiscard]] constexpr bool FlagZero(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_ZF>(flags); }
-    [[nodiscard]] constexpr bool FlagParity(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_PF>(flags); }
-    [[nodiscard]] constexpr bool FlagSign(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_SF>(flags); }
-    [[nodiscard]] constexpr bool FlagDirection(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_DF>(flags); }
-    [[nodiscard]] constexpr bool FlagOverflow(uint16_t flags) { return IsFlagSet<CPUx86::State::FLAG_OF>(flags); }
-
-    template<uint16_t Flag>
-    constexpr void SetFlag(uint16_t& flags, bool set)
-    {
-        if (set)
-            flags |= Flag;
-        else
-            flags &= ~Flag;
-    }
-
     template<unsigned int BITS>
     constexpr void SetFlagsSZP(uint16_t& flags, UintOf<BITS> v);
 
@@ -78,26 +59,26 @@ namespace
     constexpr void SetFlagsSZP<8>(uint16_t& flags, uint8_t n)
     {
         if (n & 0x80)
-            flags |= CPUx86::State::FLAG_SF;
+            flags |= cpu::flag::SF;
         if (n == 0)
-            flags |= CPUx86::State::FLAG_ZF;
+            flags |= cpu::flag::ZF;
         const uint8_t pf = std::popcount(static_cast<uint8_t>(n & 0xff));
-        if ((pf & 1) == 0) flags |= CPUx86::State::FLAG_PF;
+        if ((pf & 1) == 0) flags |= cpu::flag::PF;
     }
 
     template<>
     constexpr void SetFlagsSZP<16>(uint16_t& flags, uint16_t n)
     {
         if (n & 0x8000)
-            flags |= CPUx86::State::FLAG_SF;
+            flags |= cpu::flag::SF;
         if (n == 0)
-            flags |= CPUx86::State::FLAG_ZF;
+            flags |= cpu::flag::ZF;
         // TODO
         uint8_t pf =
             ~((n & 0x80) ^ (n & 0x40) ^ (n & 0x20) ^ (n & 0x10) ^ (n & 0x08) ^ (n & 0x04) ^
               (n & 0x02) ^ (n & 0x01));
         if (pf & 1)
-            flags |= CPUx86::State::FLAG_PF;
+            flags |= cpu::flag::PF;
     }
 
     template<unsigned int BITS>
@@ -107,11 +88,11 @@ namespace
     constexpr void SetFlagsArith<8>(uint16_t& flags, uint8_t a, uint8_t b, uint16_t res)
     {
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF |
-              CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF |
+              cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<8>(flags, res);
         if (res & 0xff00)
-            flags |= CPUx86::State::FLAG_CF;
+            flags |= cpu::flag::CF;
         // https://teaching.idallen.com/dat2343/10f/notes/040_overflow.txt
         // Overflow can only happen when adding two numbers of the same sign and
         // getting a different sign.  So, to detect overflow we don't care about
@@ -120,24 +101,24 @@ namespace
         const auto sign_b = (b & 0x80) != 0;
         const auto sign_res = (res & 0x80) != 0;
         if (sign_a == sign_b && sign_res != sign_a)
-            flags |= CPUx86::State::FLAG_OF;
+            flags |= cpu::flag::OF;
         if ((a ^ b ^ res) & 0x10)
-            flags |= CPUx86::State::FLAG_AF;
+            flags |= cpu::flag::AF;
     }
 
     template<>
     constexpr void SetFlagsArith<16>(uint16_t& flags, uint16_t a, uint16_t b, uint32_t res)
     {
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF |
-              CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF |
+              cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<16>(flags, res);
         if (res & 0xffff0000)
-            flags |= CPUx86::State::FLAG_CF;
+            flags |= cpu::flag::CF;
         if ((a ^ res) & (a ^ b) & 0x8000)
-            flags |= CPUx86::State::FLAG_OF;
+            flags |= cpu::flag::OF;
         if ((a ^ b ^ res) & 0x10)
-            flags |= CPUx86::State::FLAG_AF;
+            flags |= cpu::flag::AF;
     }
 
     template<unsigned int BITS>
@@ -146,11 +127,11 @@ namespace
         uint8_t cnt = n % BITS;
         if (cnt > 0) {
             v = (v << cnt) | (v >> (BITS - cnt));
-            SetFlag<CPUx86::State::FLAG_CF>(flags, v & 1);
+            cpu::SetFlag<cpu::flag::CF>(flags, v & 1);
         }
         if (n == 1)
-            SetFlag<CPUx86::State::FLAG_OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (FlagCarry(flags) ? 1 : 0)));
+            cpu::SetFlag<cpu::flag::OF>(
+                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
         return v;
     }
 
@@ -160,10 +141,10 @@ namespace
         const uint8_t cnt = n % BITS;
         if (cnt > 0) {
             v = (v >> cnt) | (v << (BITS - cnt));
-            SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << (BITS - 1)));
+            cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << (BITS - 1)));
         }
         if (n == 1)
-            SetFlag<CPUx86::State::FLAG_OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
+            cpu::SetFlag<cpu::flag::OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
         return v;
     }
 
@@ -173,13 +154,13 @@ namespace
         const uint8_t cnt = (n & 0x1f) % (BITS + 1);
         if (cnt > 0) {
             const uint8_t tmp =
-                (v << cnt) | ((FlagCarry(flags) ? 1 : 0) << (cnt - 1)) | (v >> ((BITS + 1) - cnt));
-            SetFlag<CPUx86::State::FLAG_CF>(flags, (v >> (BITS - cnt)) & 1);
+                (v << cnt) | ((cpu::FlagCarry(flags) ? 1 : 0) << (cnt - 1)) | (v >> ((BITS + 1) - cnt));
+            cpu::SetFlag<cpu::flag::CF>(flags, (v >> (BITS - cnt)) & 1);
             v = tmp;
         }
         if (n == 1)
-            SetFlag<CPUx86::State::FLAG_OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (FlagCarry(flags) ? 1 : 0)));
+            cpu::SetFlag<cpu::flag::OF>(
+                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
         return v;
     }
 
@@ -187,14 +168,14 @@ namespace
     [[nodiscard]] constexpr auto RCR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
         if (n == 1)
-            SetFlag<CPUx86::State::FLAG_OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (FlagCarry(flags) ? 1 : 0)));
+            cpu::SetFlag<cpu::flag::OF>(
+                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
         const uint8_t cnt = (n & 0x1f) % (BITS + 1);
         if (cnt == 0)
             return v;
         const UintOf<BITS> tmp =
-            (v >> cnt) | ((FlagCarry(flags) ? 1 : 0)) << (BITS - cnt) | (v << ((BITS + 1) - cnt));
-        SetFlag<CPUx86::State::FLAG_CF>(flags, (v >> (cnt - 1) & 1));
+            (v >> cnt) | ((cpu::FlagCarry(flags) ? 1 : 0)) << (BITS - cnt) | (v << ((BITS + 1) - cnt));
+        cpu::SetFlag<cpu::flag::CF>(flags, (v >> (cnt - 1) & 1));
         return tmp;
     }
 
@@ -204,10 +185,10 @@ namespace
         const uint8_t cnt = n & 0x1f;
         if (cnt < BITS) {
             if (cnt > 0)
-                SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << (BITS - cnt)));
+                cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << (BITS - cnt)));
             return v << cnt;
         } else {
-            SetFlag<CPUx86::State::FLAG_CF>(flags, false);
+            cpu::SetFlag<cpu::flag::CF>(flags, false);
             return 0;
         }
     }
@@ -218,14 +199,14 @@ namespace
         const uint8_t cnt = n & 0x1f;
         if (cnt < BITS) {
             if (cnt > 0)
-                SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << cnt));
+                cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << cnt));
             v >>= cnt;
         } else {
             v = 0;
-            SetFlag<CPUx86::State::FLAG_CF>(flags, false);
+            cpu::SetFlag<cpu::flag::CF>(flags, false);
         }
         if (n == 1)
-            SetFlag<CPUx86::State::FLAG_OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
+            cpu::SetFlag<cpu::flag::OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
         SetFlagsSZP<BITS>(flags, v);
         return v;
     }
@@ -235,7 +216,7 @@ namespace
     {
         uint8_t cnt = n & 0x1f;
         if (cnt > 0)
-            SetFlag<CPUx86::State::FLAG_CF>(flags, v & (1 << cnt));
+            cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << cnt));
         if (cnt < BITS) {
             if (v & (1 << (BITS - 1))) {
                 v = (v >> cnt) | (0xff << (BITS - cnt));
@@ -244,15 +225,15 @@ namespace
             }
         } else /* cnt >= BITS */ {
             if (v & (1 << (BITS - 1))) {
-                SetFlag<CPUx86::State::FLAG_CF>(flags, true);
+                cpu::SetFlag<cpu::flag::CF>(flags, true);
                 v = (1 << BITS) - 1;
             } else {
-                SetFlag<CPUx86::State::FLAG_CF>(flags, false);
+                cpu::SetFlag<cpu::flag::CF>(flags, false);
                 v = 0;
             }
         }
         if (n == 1)
-            SetFlag<CPUx86::State::FLAG_OF>(flags, 0);
+            cpu::SetFlag<cpu::flag::OF>(flags, 0);
         SetFlagsSZP<BITS>(flags, v);
         return v;
     }
@@ -270,7 +251,7 @@ namespace
         constexpr bool VerifyAdd8(const VerifyAddTuple& t)
         {
             auto [ val1, val2, expected_flags, expected_result ] = t;
-            uint16_t flags = CPUx86::State::FLAG_ON;
+            uint16_t flags = cpu::flag::ON;
             auto result = Add8(flags, val1, val2);
             return result == expected_result && flags == expected_flags;
         }
@@ -289,7 +270,7 @@ namespace
     {
         uint8_t op1 = a | b;
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<8>(flags, op1);
         return op1;
     }
@@ -298,7 +279,7 @@ namespace
     {
         uint16_t op1 = a | b;
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<16>(flags, op1);
         return op1;
     }
@@ -307,7 +288,7 @@ namespace
     {
         uint8_t op1 = a & b;
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<8>(flags, op1);
         return op1;
     }
@@ -316,7 +297,7 @@ namespace
     {
         uint16_t op1 = a & b;
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<16>(flags, op1);
         return op1;
     }
@@ -325,7 +306,7 @@ namespace
     {
         uint8_t op1 = a ^ b;
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<8>(flags, op1);
         return op1;
     }
@@ -334,21 +315,21 @@ namespace
     {
         uint16_t op1 = a ^ b;
         flags &=
-            ~(CPUx86::State::FLAG_OF | CPUx86::State::FLAG_SF | CPUx86::State::FLAG_ZF | CPUx86::State::FLAG_PF | CPUx86::State::FLAG_CF);
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<16>(flags, op1);
         return op1;
     }
 
     [[nodiscard]] constexpr uint8_t Adc8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint16_t res = a + b + FlagCarry(flags) ? 1 : 0;
+        uint16_t res = a + b + cpu::FlagCarry(flags) ? 1 : 0;
         SetFlagsArith<8>(flags, a, b, res);
         return res & 0xff;
     }
 
     [[nodiscard]] constexpr uint16_t Adc16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint32_t res = a + b + FlagCarry(flags) ? 1 : 0;
+        uint32_t res = a + b + cpu::FlagCarry(flags) ? 1 : 0;
         SetFlagsArith<16>(flags, a, b, res);
         return res & 0xffff;
     }
@@ -369,82 +350,82 @@ namespace
 
     [[nodiscard]] constexpr uint8_t Sbb8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint16_t res = a - b - FlagCarry(flags) ? 1 : 0;
+        uint16_t res = a - b - cpu::FlagCarry(flags) ? 1 : 0;
         SetFlagsArith<8>(flags, a, b, res);
         return res & 0xff;
     }
 
     [[nodiscard]] constexpr uint16_t Sbb16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint32_t res = a - b - FlagCarry(flags) ? 1 : 0;
+        uint32_t res = a - b - cpu::FlagCarry(flags) ? 1 : 0;
         SetFlagsArith<16>(flags, a, b, res);
         return res & 0xffff;
     }
 
     [[nodiscard]] constexpr uint8_t Inc8(uint16_t& flags, uint8_t a)
     {
-        const auto carry = FlagCarry(flags);
+        const auto carry = cpu::FlagCarry(flags);
         uint8_t res = Add8(flags, a, 1);
-        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        cpu::SetFlag<cpu::flag::CF>(flags, carry);
         return res;
     }
 
     [[nodiscard]] constexpr uint16_t Inc16(uint16_t& flags, uint16_t a)
     {
-        const bool carry = FlagCarry(flags);
+        const bool carry = cpu::FlagCarry(flags);
         uint16_t res = Add16(flags, a, 1);
-        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        cpu::SetFlag<cpu::flag::CF>(flags, carry);
         return res;
     }
 
     [[nodiscard]] constexpr uint8_t Dec8(uint16_t& flags, uint8_t a)
     {
-        bool carry = FlagCarry(flags);
+        bool carry = cpu::FlagCarry(flags);
         uint8_t res = Sub8(flags, a, 1);
-        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        cpu::SetFlag<cpu::flag::CF>(flags, carry);
         return res;
     }
 
     [[nodiscard]] constexpr uint16_t Dec16(uint16_t& flags, uint16_t a)
     {
-        bool carry = FlagCarry(flags);
+        bool carry = cpu::FlagCarry(flags);
         uint16_t res = Sub16(flags, a, 1);
-        SetFlag<CPUx86::State::FLAG_CF>(flags, carry);
+        cpu::SetFlag<cpu::flag::CF>(flags, carry);
         return res;
     }
 
     constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
     {
-        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        flags &= ~(cpu::flag::CF | cpu::flag::OF);
         ax = (ax & 0xff) * (uint16_t)a;
         if (ax >= 0x100)
-            flags |= (CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+            flags |= (cpu::flag::CF | cpu::flag::OF);
     }
 
     constexpr void Mul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
     {
-        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        flags &= ~(cpu::flag::CF | cpu::flag::OF);
         dx = (ax * a) >> 16;
         ax = (ax * a) & 0xffff;
         if (dx != 0)
-            flags |= (CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+            flags |= (cpu::flag::CF | cpu::flag::OF);
     }
 
     constexpr void Imul8(uint16_t& flags, uint16_t& ax, uint8_t a)
     {
-        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        flags &= ~(cpu::flag::CF | cpu::flag::OF);
         ax = (ax & 0xff) * (uint16_t)a;
         const uint8_t ah = (ax & 0xff00) >> 8;
-        SetFlag<CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF>(flags, ah == 0 || ah == 0xff);
+        cpu::SetFlag<cpu::flag::CF | cpu::flag::OF>(flags, ah == 0 || ah == 0xff);
     }
 
     constexpr void Imul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
     {
-        flags &= ~(CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF);
+        flags &= ~(cpu::flag::CF | cpu::flag::OF);
         uint32_t res = static_cast<uint32_t>(ax) * static_cast<uint32_t>(a);
         dx = res >> 16;
         ax = res & 0xffff;
-        SetFlag<CPUx86::State::FLAG_CF | CPUx86::State::FLAG_OF>(flags, dx == 0 || dx == 0xffff);
+        cpu::SetFlag<cpu::flag::CF | cpu::flag::OF>(flags, dx == 0 || dx == 0xffff);
     }
 
     // Returns true to signal interrupt
@@ -516,11 +497,11 @@ namespace
             ip += n;
     }
 
-    uint16_t HandleSegmentOverride(CPUx86::State& state, uint16_t def)
+    uint16_t HandleSegmentOverride(cpu::State& state, uint16_t def)
     {
-        if ((state.m_prefix & CPUx86::State::PREFIX_SEG) == 0)
+        if ((state.m_prefix & cpu::State::PREFIX_SEG) == 0)
             return def;
-        state.m_prefix &= ~CPUx86::State::PREFIX_SEG;
+        state.m_prefix &= ~cpu::State::PREFIX_SEG;
         return state.m_seg_override;
     }
 
@@ -531,7 +512,7 @@ void CPUx86::RunInstruction()
 #if 0
     VerifyAddTuple t{ 0x01, 0x0f, 0x0012, 0x10 };
     auto [ val1, val2, expected_flags, expected_result ] = t;
-    uint16_t flags = CPUx86::State::FLAG_ON;
+    uint16_t flags = cpu::flag::ON;
     auto result = Add8(flags, val1, val2);
     printf("result %x == expected_result %x\n", result, expected_result);
     printf("flags %x == expected_flags %x\n", flags, expected_flags);
@@ -766,7 +747,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x26: /* ES: */ {
-            m_State.m_prefix |= State::PREFIX_SEG;
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
             m_State.m_seg_override = SEG_ES;
             break;
         }
@@ -801,7 +782,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x2e: /* CS: */ {
-            m_State.m_prefix |= State::PREFIX_SEG;
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
             m_State.m_seg_override = SEG_CS;
             break;
         }
@@ -836,7 +817,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x36: /* SS: */ {
-            m_State.m_prefix |= State::PREFIX_SEG;
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
             m_State.m_seg_override = SEG_SS;
             break;
         }
@@ -883,7 +864,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x3e: /* DS: */ {
-            m_State.m_prefix |= State::PREFIX_SEG;
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
             m_State.m_seg_override = SEG_DS;
             break;
         }
@@ -1088,67 +1069,67 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x70: /* JO Jb */ {
-            handleConditionalJump(FlagOverflow(m_State.m_flags));
+            handleConditionalJump(cpu::FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x71: /* JNO Jb */ {
-            handleConditionalJump(!FlagOverflow(m_State.m_flags));
+            handleConditionalJump(!cpu::FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x72: /* JB Jb */ {
-            handleConditionalJump(FlagCarry(m_State.m_flags));
+            handleConditionalJump(cpu::FlagCarry(m_State.m_flags));
             break;
         }
         case 0x73: /* JNB Jb */ {
-            handleConditionalJump(!FlagCarry(m_State.m_flags));
+            handleConditionalJump(!cpu::FlagCarry(m_State.m_flags));
             break;
         }
         case 0x74: /* JZ Jb */ {
-            handleConditionalJump(FlagZero(m_State.m_flags));
+            handleConditionalJump(cpu::FlagZero(m_State.m_flags));
             break;
         }
         case 0x75: /* JNZ Jb */ {
-            handleConditionalJump(!FlagZero(m_State.m_flags));
+            handleConditionalJump(!cpu::FlagZero(m_State.m_flags));
             break;
         }
         case 0x76: /* JBE Jb */ {
-            handleConditionalJump(FlagCarry(m_State.m_flags) || FlagZero(m_State.m_flags));
+            handleConditionalJump(cpu::FlagCarry(m_State.m_flags) || cpu::FlagZero(m_State.m_flags));
             break;
         }
         case 0x77: /* JA Jb */ {
-            handleConditionalJump(!FlagCarry(m_State.m_flags) && !FlagZero(m_State.m_flags));
+            handleConditionalJump(!cpu::FlagCarry(m_State.m_flags) && !cpu::FlagZero(m_State.m_flags));
             break;
         }
         case 0x78: /* JS Jb */ {
-            handleConditionalJump(FlagSign(m_State.m_flags));
+            handleConditionalJump(cpu::FlagSign(m_State.m_flags));
             break;
         }
         case 0x79: /* JNS Jb */ {
-            handleConditionalJump(!FlagSign(m_State.m_flags));
+            handleConditionalJump(!cpu::FlagSign(m_State.m_flags));
             break;
         }
         case 0x7a: /* JPE Jb */ {
-            handleConditionalJump(FlagParity(m_State.m_flags));
+            handleConditionalJump(cpu::FlagParity(m_State.m_flags));
             break;
         }
         case 0x7b: /* JPO Jb */ {
-            handleConditionalJump(!FlagParity(m_State.m_flags));
+            handleConditionalJump(!cpu::FlagParity(m_State.m_flags));
             break;
         }
         case 0x7c: /* JL Jb */ {
-            handleConditionalJump(FlagSign(m_State.m_flags) != FlagOverflow(m_State.m_flags));
+            handleConditionalJump(cpu::FlagSign(m_State.m_flags) != cpu::FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x7d: /* JGE Jb */ {
-            handleConditionalJump(FlagSign(m_State.m_flags) == FlagOverflow(m_State.m_flags));
+            handleConditionalJump(cpu::FlagSign(m_State.m_flags) == cpu::FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x7e: /* JLE Jb */ {
-            handleConditionalJump(FlagSign(m_State.m_flags) != FlagOverflow(m_State.m_flags) || FlagZero(m_State.m_flags));
+            handleConditionalJump(cpu::FlagSign(m_State.m_flags) != cpu::FlagOverflow(m_State.m_flags) || cpu::FlagZero(m_State.m_flags));
             break;
         }
         case 0x7f: /* JG Jb */ {
-            handleConditionalJump(!FlagZero(m_State.m_flags) && FlagSign(m_State.m_flags) == FlagOverflow(m_State.m_flags));
+            handleConditionalJump(!cpu::FlagZero(m_State.m_flags) && cpu::FlagSign(m_State.m_flags) == cpu::FlagOverflow(m_State.m_flags));
             break;
         }
         case 0x80:
@@ -1384,11 +1365,11 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x9c: /* PUSHF */ {
-            Push16(m_State.m_flags | State::FLAG_ON);
+            Push16(m_State.m_flags | cpu::flag::ON);
             break;
         }
         case 0x9d: /* POPF */ {
-            m_State.m_flags = Pop16() | State::FLAG_ON;
+            m_State.m_flags = Pop16() | cpu::flag::ON;
             break;
         }
         case 0x9e: /* SAHF */ {
@@ -1425,9 +1406,9 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xa4: /* MOVSB */ {
-            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteByte(
@@ -1436,7 +1417,7 @@ void CPUx86::RunInstruction()
                     m_State.m_si += delta;
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteByte(
                     MakeAddr(m_State.m_es, m_State.m_di),
@@ -1447,9 +1428,9 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xa5: /* MOVSW */ {
-            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteWord(
@@ -1458,7 +1439,7 @@ void CPUx86::RunInstruction()
                     m_State.m_si += delta;
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteWord(
                     MakeAddr(m_State.m_es, m_State.m_di),
@@ -1469,10 +1450,10 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xa6: /* CMPSB */ {
-            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+                bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     [[maybe_unused]] auto _ = Sub8(m_State.m_flags,
@@ -1480,10 +1461,10 @@ void CPUx86::RunInstruction()
                         m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
-                    if (FlagZero(m_State.m_flags) == break_on_zf)
+                    if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 [[maybe_unused]] auto _ = Sub8(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
@@ -1494,10 +1475,10 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xa7: /* CMPSW */ {
-            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+                bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     [[maybe_unused]] auto _ = Sub16(m_State.m_flags,
@@ -1505,10 +1486,10 @@ void CPUx86::RunInstruction()
                         m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
-                    if (FlagZero(m_State.m_flags) == break_on_zf)
+                    if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 [[maybe_unused]] auto _ = Sub16(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
@@ -1529,15 +1510,15 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xaa: /* STOSB */ {
-            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             uint8_t value = m_State.m_ax & 0xff;
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteByte(MakeAddr(m_State.m_es, m_State.m_di), value);
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteByte(MakeAddr(m_State.m_es, m_State.m_di), value);
                 m_State.m_di += delta;
@@ -1545,14 +1526,14 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xab: /* STOSW */ {
-            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteWord(MakeAddr(m_State.m_es, m_State.m_di), m_State.m_ax);
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteWord(MakeAddr(m_State.m_es, m_State.m_di), m_State.m_ax);
                 m_State.m_di += delta;
@@ -1563,7 +1544,7 @@ void CPUx86::RunInstruction()
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax =
                 (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si));
-            if (FlagDirection(m_State.m_flags))
+            if (cpu::FlagDirection(m_State.m_flags))
                 m_State.m_si--;
             else
                 m_State.m_si++;
@@ -1572,25 +1553,25 @@ void CPUx86::RunInstruction()
         case 0xad: /* LODSW */ {
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si));
-            if (FlagDirection(m_State.m_flags))
+            if (cpu::FlagDirection(m_State.m_flags))
                 m_State.m_si -= 2;
             else
                 m_State.m_si += 2;
             break;
         }
         case 0xae: /* SCASB */ {
-            int delta = FlagDirection(m_State.m_flags) ? -1 : 1;
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             uint8_t val = m_State.m_ax & 0xff;
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+                bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
-                    if (FlagZero(m_State.m_flags) == break_on_zf)
+                    if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
@@ -1598,17 +1579,17 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xaf: /* SCASW */ {
-            int delta = FlagDirection(m_State.m_flags) ? -2 : 2;
-            if (m_State.m_prefix & (State::PREFIX_REPZ | State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & (State::PREFIX_REPNZ)) != 0;
+            int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
+            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+                bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     [[maybe_unused]] auto _ = Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
-                    if (FlagZero(m_State.m_flags) == break_on_zf)
+                    if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(State::PREFIX_REPZ | State::PREFIX_REPNZ);
+                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 [[maybe_unused]] auto _ = Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
@@ -1774,7 +1755,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xce: /* INTO */ {
-            if (!FlagOverflow(m_State.m_flags))
+            if (!cpu::FlagOverflow(m_State.m_flags))
                 HandleInterrupt(INT_OVERFLOW);
             break;
         }
@@ -1978,12 +1959,12 @@ void CPUx86::RunInstruction()
         }
         case 0xe0: /* LOOPNZ Jb */ {
             m_State.m_cx--;
-            handleConditionalJump(!FlagZero(m_State.m_flags) && m_State.m_cx != 0);
+            handleConditionalJump(!cpu::FlagZero(m_State.m_flags) && m_State.m_cx != 0);
             break;
         }
         case 0xe1: /* LOOPZ Jb */ {
             m_State.m_cx--;
-            handleConditionalJump(FlagZero(m_State.m_flags) && m_State.m_cx != 0);
+            handleConditionalJump(cpu::FlagZero(m_State.m_flags) && m_State.m_cx != 0);
             break;
         }
         case 0xe2: /* LOOP Jb */ {
@@ -2060,11 +2041,11 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xf2: /* REPNZ */ {
-            m_State.m_prefix |= State::PREFIX_REPNZ;
+            m_State.m_prefix |= cpu::State::PREFIX_REPNZ;
             break;
         }
         case 0xf3: /* REPZ */ {
-            m_State.m_prefix |= State::PREFIX_REPZ;
+            m_State.m_prefix |= cpu::State::PREFIX_REPZ;
             break;
         }
         case 0xf4: /* HLT */ {
@@ -2072,7 +2053,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xf5: /* CMC */ {
-            m_State.m_flags ^= State::FLAG_CF;
+            m_State.m_flags ^= cpu::flag::CF;
             break;
         }
         case 0xf6: /* GRP3a Eb */ {
@@ -2150,27 +2131,27 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xf8: /* CLC */ {
-            m_State.m_flags &= ~State::FLAG_CF;
+            m_State.m_flags &= ~cpu::flag::CF;
             break;
         }
         case 0xf9: /* STC */ {
-            m_State.m_flags |= State::FLAG_CF;
+            m_State.m_flags |= cpu::flag::CF;
             break;
         }
         case 0xfa: /* CLI */ {
-            m_State.m_flags &= ~State::FLAG_IF;
+            m_State.m_flags &= ~cpu::flag::IF;
             break;
         }
         case 0xfb: /* STI */ {
-            m_State.m_flags |= State::FLAG_IF;
+            m_State.m_flags |= cpu::flag::IF;
             break;
         }
         case 0xfc: /* CLD */ {
-            m_State.m_flags &= ~State::FLAG_DF;
+            m_State.m_flags &= ~cpu::flag::DF;
             break;
         }
         case 0xfd: /* STD */ {
-            m_State.m_flags |= State::FLAG_DF;
+            m_State.m_flags |= cpu::flag::DF;
             break;
         }
         case 0xfe: /* GRP4 Eb */ {
@@ -2557,17 +2538,22 @@ uint16_t CPUx86::Pop16()
     return value;
 }
 
-void CPUx86::State::Dump()
+namespace cpu
+{
+
+void Dump(const State& st)
 {
     fprintf(
-        stderr, "  ax=%04x bx=%04x cx=%04x dx=%04x si=%04x di=%04x bp=%04x flags=%04x\n", m_ax,
-        m_bx, m_cx, m_dx, m_si, m_di, m_bp, m_flags);
+        stderr, "  ax=%04x bx=%04x cx=%04x dx=%04x si=%04x di=%04x bp=%04x flags=%04x\n", st.m_ax,
+        st.m_bx, st.m_cx, st.m_dx, st.m_si, st.m_di, st.m_bp, st.m_flags);
     fprintf(
-        stderr, "  cs:ip=%04x:%04x ds=%04x es=%04x ss:sp=%04x:%04x\n", m_cs, m_ip, m_ds, m_es, m_ss,
-        m_sp);
+        stderr, "  cs:ip=%04x:%04x ds=%04x es=%04x ss:sp=%04x:%04x\n", st.m_cs, st.m_ip, st.m_ds, st.m_es, st.m_ss,
+        st.m_sp);
 }
 
-void CPUx86::Dump() { m_State.Dump(); }
+}
+
+void CPUx86::Dump() { cpu::Dump(m_State); }
 
 void CPUx86::SignalInterrupt(uint8_t no)
 {
@@ -2613,7 +2599,7 @@ void CPUx86::HandleInterrupt(uint8_t no)
 		uint16_t ah = (m_State.m_ax & 0xff00) >> 8;
 		switch(ah) {
 			case 1: // check for key
-				SetFlag<State::FLAG_ZF>(m_State.m_flags, true);
+				cpu::SetFlag<cpu::flag::ZF>(m_State.m_flags, true);
 				break;
 			default:
 				TRACE("HandleInterrupt %d func %d\n", no, ah);

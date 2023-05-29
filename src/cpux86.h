@@ -2,6 +2,7 @@
 #define __CPUX86_H__
 
 #include <stdint.h>
+#include "state.h"
 
 class IO;
 class Memory;
@@ -35,36 +36,8 @@ class CPUx86
         m_State.m_ds = seg;
         m_State.m_es = seg;
     }
-
-    //! \brief CPU state
-    class State
-    {
-      public:
-        uint16_t m_ax, m_cx, m_dx, m_bx, m_sp, m_bp, m_si, m_di, m_ip;
-        uint16_t m_es, m_cs, m_ss, m_ds;
-        uint16_t m_flags;
-        uint16_t m_prefix;
-        uint16_t m_seg_override;
-
-        static const uint16_t FLAG_CF = (1 << 0);
-        static const uint16_t FLAG_ON = (1 << 1); /* This flag is always set */
-        static const uint16_t FLAG_PF = (1 << 2);
-        static const uint16_t FLAG_AF = (1 << 4);
-        static const uint16_t FLAG_ZF = (1 << 6);
-        static const uint16_t FLAG_SF = (1 << 7);
-        static const uint16_t FLAG_TF = (1 << 8);
-        static const uint16_t FLAG_IF = (1 << 9);
-        static const uint16_t FLAG_DF = (1 << 10);
-        static const uint16_t FLAG_OF = (1 << 11);
-
-        static const unsigned int PREFIX_REPZ = (1 << 0);
-        static const unsigned int PREFIX_REPNZ = (1 << 1);
-        static const unsigned int PREFIX_SEG = (1 << 2);
-
-        void Dump();
-    };
-    State& GetState() { return m_State; }
-    const State& GetState() const { return m_State; }
+    cpu::State& GetState() { return m_State; }
+    const cpu::State& GetState() const { return m_State; }
     Memory& GetMemory() { return m_Memory; }
     const Memory& GetMemory() const { return m_Memory; }
     IO& GetIO() { return m_IO; }
@@ -127,7 +100,7 @@ class CPUx86
     IO& m_IO;
 
     //! \brief Current CPU state
-    State m_State;
+    cpu::State m_State;
 
     //! \brief Interrupt vectors in use
     Vectors& m_Vectors;

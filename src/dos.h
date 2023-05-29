@@ -61,7 +61,7 @@ class DOS : public XCallableVector
     void Reset();
     ErrorCode LoadEXE(std::ifstream& ifs);
 
-    void InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState);
+    void InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState);
 
   private:
     Memory& m_Memory;

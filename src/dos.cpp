@@ -159,21 +159,21 @@ DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
     }
 
     /* Update CPU fields */
-    CPUx86::State& oState = m_CPU.GetState();
-    oState.m_ax = 0xffff; // TODO FCB stuff
-    oState.m_bx = 0;      // XXX env segment
-    oState.m_cx = 0;      // XXX data segment size
-    oState.m_cs = header.eh_cs + exe_seg;
-    oState.m_ss = header.eh_cs + exe_seg;
-    oState.m_ds = seg;
-    oState.m_es = seg;
-    oState.m_ip = header.eh_ip;
-    oState.m_sp = header.eh_sp;
+    auto& state = m_CPU.GetState();
+    state.m_ax = 0xffff; // TODO FCB stuff
+    state.m_bx = 0;      // XXX env segment
+    state.m_cx = 0;      // XXX data segment size
+    state.m_cs = header.eh_cs + exe_seg;
+    state.m_ss = header.eh_cs + exe_seg;
+    state.m_ds = seg;
+    state.m_es = seg;
+    state.m_ip = header.eh_ip;
+    state.m_sp = header.eh_sp;
 
     return ErrorCode::Success;
 }
 
-void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
+void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
 {
     Memory& oMemory = oCPU.GetMemory();
     if (no != 0x21) {
@@ -190,12 +190,12 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
 #define ES oState.m_es
 
     auto SetError = [&](const ErrorCode ec) {
-        oState.m_flags |= CPUx86::State::FLAG_CF;
+        oState.m_flags |= cpu::flag::CF;
         oState.m_ax = static_cast<uint16_t>(ec);
     };
 
     /* Default to okay */
-    oState.m_flags &= ~CPUx86::State::FLAG_CF;
+    oState.m_flags &= ~cpu::flag::CF;
 
     uint8_t ah = (oState.m_ax & 0xff00) >> 8;
     switch (ah) {

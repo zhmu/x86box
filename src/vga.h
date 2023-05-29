@@ -27,7 +27,7 @@ class VGA : public XMemoryMapped, public XCallableVector
     static constexpr inline unsigned int s_video_width = 640;
     static constexpr inline unsigned int s_video_height = 400;
 
-    void InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState);
+    void InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState);
 
   protected:
     std::unique_ptr<uint8_t[]> m_videomem;

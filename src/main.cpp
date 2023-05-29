@@ -12,9 +12,9 @@
 Memory memory;
 IO io;
 Vectors vectors(memory);
-CPUx86 cpu(memory, io, vectors);
+CPUx86 x86cpu(memory, io, vectors);
 HostIO hostio;
-DOS dos(cpu, memory, vectors);
+DOS dos(x86cpu, memory, vectors);
 VGA vga(memory, hostio, vectors);
 Keyboard keyboard(memory, hostio, vectors);
 
@@ -45,13 +45,13 @@ int main(int argc, char** argv)
     memory.AddPeripheral(0xb0000, 65535, vga);
     io.Reset();
     dos.Reset();
-    cpu.Reset();
+    x86cpu.Reset();
     vga.Reset();
     keyboard.Reset();
 
     if (!load_to_memory("../images/snake.bin", 0x10100))
         abort();
-    cpu.SetupForCOM(0x1000);
+    x86cpu.SetupForCOM(0x1000);
 
     if (0) {
         std::ifstream ifs("../images/maze.exe");
@@ -66,8 +66,8 @@ int main(int argc, char** argv)
 
 #if 0
 	for (int i = 0; i < 1000; i++) {
-		cpu.RunInstruction();
-		cpu.Dump();
+		x86cpu.RunInstruction();
+		x86cpu.Dump();
   }
 return 1;
 
@@ -75,8 +75,8 @@ return 1;
 
     unsigned int n = 0, m = 0;
     while (!hostio.Quitting()) {
-        cpu.RunInstruction();
-        cpu.Dump();
+        x86cpu.RunInstruction();
+        x86cpu.Dump();
         if (++n >= 500) {
             vga.Update();
             hostio.Update();

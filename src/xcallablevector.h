@@ -6,7 +6,7 @@
 class XCallableVector
 {
   public:
-    virtual void InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState) = 0;
+    virtual void InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState) = 0;
 };
 
 #endif /* __XCALLABLEVECTOR_H__ */

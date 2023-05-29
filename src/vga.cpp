@@ -86,7 +86,7 @@ void VGA::Update()
         }
 }
 
-void VGA::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
+void VGA::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
 {
     const auto getAl = [&]() { return oState.m_ax & 0xff; };
     const auto getBh = [&]() { return (oState.m_bx & 0xff00) >> 8; };

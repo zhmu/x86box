@@ -15,7 +15,7 @@ class Keyboard : public XCallableVector
 
     virtual void Reset();
 
-    void InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState);
+    void InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState);
 
   protected:
     //! \brief Host IO used
