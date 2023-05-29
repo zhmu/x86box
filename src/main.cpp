@@ -56,7 +56,7 @@ int main(int argc, char** argv)
     if (0) {
         std::ifstream ifs("../images/maze.exe");
         const auto err = dos.LoadEXE(ifs);
-        if (err != DOS::E_SUCCESS) {
+        if (err != DOS::ErrorCode::Success) {
             fprintf(stderr, "can't load exe: %u\n", err);
             return 1;
         }

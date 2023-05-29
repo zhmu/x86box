@@ -11,10 +11,70 @@
 #define TRACE_INT(x...) fprintf(stderr, "[dos-int] " x)
 #define TRACE_EXE(x...) fprintf(stderr, "[dos-exe] " x)
 
+namespace
+{
+    struct EXEHeader {
+        uint16_t eh_signature;
+    #define DOS_EXEHEADER_SIGNATURE 0x5a4d /* 'MZ' */
+        uint16_t eh_bytes_in_last_block;
+        uint16_t eh_blocks_in_file;
+        uint16_t eh_num_relocs;
+        uint16_t eh_header_paragraphs;
+        uint16_t eh_min_extra_paragraphs;
+        uint16_t eh_max_extra_paragraphs;
+        uint16_t eh_ss;
+        uint16_t eh_sp;
+        uint16_t eh_checksum;
+        uint16_t eh_ip;
+        uint16_t eh_cs;
+        uint16_t eh_reloc_table_offset;
+        uint16_t eh_overlay_number;
+    } PACKED;
+
+    struct EXERelocation {
+        uint16_t er_offset;
+        uint16_t er_segment;
+    } PACKED;
+
+    struct ProgramSegmentPrefix {
+        uint8_t psp_exit[2];
+        uint16_t psp_mem_size;
+        uint8_t psp_unused1;
+        uint8_t psp_cpm_entry;
+        uint16_t psp_cpm_segment_size;
+        uint32_t psp_terminate_addr;
+        uint32_t psp_break_addr;
+        uint32_t psp_error_addr;
+        uint16_t psp_parent_seg;
+        uint8_t psp_open_tab[20];
+        uint16_t psp_env_seg;
+        uint32_t psp_ss_sp;
+        uint16_t psp_max_open;
+        uint32_t psp_open_addr;
+        uint32_t psp_prev_psp;
+        uint8_t psp_unused2[20];
+        uint8_t psp_fn_disp[3];
+        uint8_t psp_unused3[9];
+        uint8_t psp_fcb[36];
+        uint8_t psp_arg[128];
+    } PACKED;
+    static_assert(sizeof(struct ProgramSegmentPrefix) == 256);
+
+    void CreatePSP(ProgramSegmentPrefix& oPSP)
+    {
+        memset(&oPSP, 0, sizeof(oPSP));
+        oPSP.psp_exit[0] = 0xcd;
+        oPSP.psp_exit[1] = 0x20; /* INT 20 */
+        oPSP.psp_fn_disp[0] = 0xcd;
+        oPSP.psp_fn_disp[1] = 0x21; /* INT 21 */
+        oPSP.psp_fn_disp[2] = 0xcb; /* RETN */
+    }
+
+}
+
 DOS::DOS(CPUx86& oCPU, Memory& oMemory, Vectors& oVectors)
     : m_CPU(oCPU), m_Memory(oMemory), m_Vectors(oVectors)
 {
-    static_assert(sizeof(struct DOS::ProgramSegmentPrefix) == 256);
 }
 
 void DOS::Reset()
@@ -36,18 +96,18 @@ namespace
 DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
 {
     if (!ifs.good())
-        return E_FILE_NOT_FOUND;
+        return ErrorCode::FileNotFound;
 
     /* Read EXE Header */
     struct EXEHeader header;
     ifs.seekg(0);
     if (!ReadFromStream(ifs, header))
-        return E_READ_FAULT;
+        return ErrorCode::ReadFault;
     /* XXX Convert header to native format */
     if (header.eh_signature != DOS_EXEHEADER_SIGNATURE)
-        return E_INVALID_FORMAT;
+        return ErrorCode::InvalidFormat;
     if (header.eh_blocks_in_file >= 512)
-        return E_INVALID_FORMAT;
+        return ErrorCode::InvalidFormat;
 
     /* Determine exe size */
     uint16_t exe_size = header.eh_blocks_in_file * 512 - (512 - header.eh_bytes_in_last_block);
@@ -62,8 +122,8 @@ DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
     uint16_t bss_seg = exe_seg + (exe_size + 15) / 16;
 
     /* Create a PSP */
-    struct ProgramSegmentPrefix* oPSP =
-        (struct ProgramSegmentPrefix*)m_Memory.GetPointer(CPUx86::MakeAddr(seg, 0), sizeof(*oPSP));
+    ProgramSegmentPrefix* oPSP =
+        reinterpret_cast<ProgramSegmentPrefix*>(m_Memory.GetPointer(CPUx86::MakeAddr(seg, 0), sizeof(*oPSP)));
     CreatePSP(*oPSP);
 
     TRACE_EXE(
@@ -80,7 +140,7 @@ DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
     for (unsigned int n = 0; n < exe_size; n++) {
         uint8_t b;
         if (!ReadFromStream(ifs, b))
-            return E_READ_FAULT; // XXX Is this the correct error code?
+            return ErrorCode::ReadFault; // XXX Is this the correct error code?
         m_Memory.WriteByte(CPUx86::MakeAddr(exe_seg, n), b);
     }
 
@@ -91,7 +151,7 @@ DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
     for (unsigned int n = 0; n < header.eh_num_relocs; n++) {
         struct EXERelocation reloc;
         if (!ReadFromStream(ifs, reloc))
-            return E_READ_FAULT;
+            return ErrorCode::ReadFault;
         /* XXX Convert relocation to native form */
         // printf("reloc [%x:%x]\n", reloc.er_segment, reloc.er_offset);
         const auto reloc_addr = CPUx86::MakeAddr(reloc.er_segment + exe_seg, reloc.er_offset);
@@ -110,17 +170,7 @@ DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
     oState.m_ip = header.eh_ip;
     oState.m_sp = header.eh_sp;
 
-    return E_SUCCESS;
-}
-
-void DOS::CreatePSP(struct ProgramSegmentPrefix& oPSP)
-{
-    memset(&oPSP, 0, sizeof(oPSP));
-    oPSP.psp_exit[0] = 0xcd;
-    oPSP.psp_exit[1] = 0x20; /* INT 20 */
-    oPSP.psp_fn_disp[0] = 0xcd;
-    oPSP.psp_fn_disp[1] = 0x21; /* INT 21 */
-    oPSP.psp_fn_disp[2] = 0xcb; /* RETN */
+    return ErrorCode::Success;
 }
 
 void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
@@ -139,9 +189,10 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
 #define DS oState.m_ds
 #define ES oState.m_es
 
-#define SET_ERROR(n)                          \
-    oState.m_flags |= CPUx86::State::FLAG_CF; \
-    AX = (n)
+    auto SetError = [&](const ErrorCode ec) {
+        oState.m_flags |= CPUx86::State::FLAG_CF;
+        oState.m_ax = static_cast<uint16_t>(ec);
+    };
 
     /* Default to okay */
     oState.m_flags &= ~CPUx86::State::FLAG_CF;
@@ -182,7 +233,7 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
             TRACE_INT(
                 "ah=%02x: create/truncate file, cx=%04x ds:dx=%04x:%04x '%s'\n", ah, CX, DS, DX,
                 sFilename);
-            // SET_ERROR(E_FILE_NOT_FOUND);
+            // SetError(ErrorCode::FileNotFound);
             AX = 42;
             break;
         }
@@ -194,7 +245,7 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
         }
         default: /* what's this? */
             TRACE_INT("unknown function ah=%02x\n", ah);
-            SET_ERROR(E_INVALID_FN);
+            SetError(ErrorCode::InvalidFunction);
             break;
     }
 }
