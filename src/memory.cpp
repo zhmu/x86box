@@ -1,75 +1,83 @@
 #include "memory.h"
 #include <string.h>
+#include <algorithm>
 
 #include <stdio.h>
 
-Memory::Memory() { m_Memory = new uint8_t[m_MemorySize]; }
-
-Memory::~Memory() { delete[] m_Memory; }
-
-void Memory::Reset() { memset(m_Memory, 0, m_MemorySize); }
-
-#define MEMORY_PERIPHERAL_READ_OP(op)                                                           \
-    for (TPeripheralList::iterator it = m_peripheral.begin(); it != m_peripheral.end(); it++) { \
-        if (it->Matches(addr))                                                                  \
-            return (*it)->op(addr);                                                             \
-    }
-
-#define MEMORY_PERIPHERAL_WRITE_OP(op)                                                          \
-    for (TPeripheralList::iterator it = m_peripheral.begin(); it != m_peripheral.end(); it++) { \
-        if (it->Matches(addr)) {                                                                \
-            (*it)->op(addr, data);                                                              \
-            return;                                                                             \
-        }                                                                                       \
-    }
-
-uint8_t Memory::ReadByte(addr_t addr)
+namespace
 {
-    MEMORY_PERIPHERAL_READ_OP(ReadByte);
+    static const unsigned int memorySize = 1048576;
+    static const unsigned int m_StringSize = 256;
+}
+
+Memory::Memory() { m_Memory = std::make_unique<uint8_t[]>(memorySize); }
+Memory::~Memory() = default;
+
+void Memory::Reset() { memset(m_Memory.get(), 0, memorySize); }
+
+uint8_t Memory::ReadByte(Address addr)
+{
+    const auto p = FindPeripheralByAddress(addr);
+    if (p) return p->ReadByte(addr);
     return m_Memory[addr];
 }
 
-uint16_t Memory::ReadWord(addr_t addr)
+uint16_t Memory::ReadWord(Address addr)
 {
-    MEMORY_PERIPHERAL_READ_OP(ReadWord);
+    const auto p = FindPeripheralByAddress(addr);
+    if (p) return p->ReadWord(addr);
     return m_Memory[addr] | (uint16_t)m_Memory[addr + 1] << 8;
 }
 
-void Memory::WriteByte(addr_t addr, uint8_t data)
+void Memory::WriteByte(Address addr, uint8_t data)
 {
-    MEMORY_PERIPHERAL_WRITE_OP(WriteByte);
-    m_Memory[addr] = data;
+    const auto p = FindPeripheralByAddress(addr);
+    if (p) {
+        p->WriteByte(addr, data);
+    } else {
+        m_Memory[addr] = data;
+    }
 }
 
-void Memory::WriteWord(addr_t addr, uint16_t data)
+void Memory::WriteWord(Address addr, uint16_t data)
 {
-    MEMORY_PERIPHERAL_WRITE_OP(WriteWord);
-    m_Memory[addr + 0] = data & 0xff;
-    m_Memory[addr + 1] = data >> 8;
+    const auto p = FindPeripheralByAddress(addr);
+    if (p) {
+        p->WriteWord(addr, data);
+    } else {
+        m_Memory[addr + 0] = data & 0xff;
+        m_Memory[addr + 1] = data >> 8;
+    }
 }
 
-void Memory::AddPeripheral(addr_t base, uint16_t length, XMemoryMapped& oPeripheral)
+void Memory::AddPeripheral(Address base, uint16_t length, XMemoryMapped& oPeripheral)
 {
     m_peripheral.push_back(MemoryMapped(base, length, oPeripheral));
 }
 
-char* Memory::GetASCIIZString(addr_t addr)
+std::string Memory::GetASCIIZString(Address addr)
 {
-    char* ptr = m_String;
-    for (unsigned int n = 0; n < m_StringSize; n++) {
-        *ptr = ReadByte(addr++);
-        if (*ptr == 0)
-            return m_String;
-        ptr++;
+    std::string s;
+    while(true) {
+        const auto v = ReadByte(addr++);
+        if (v == 0)
+            break;
+        s += v;
     }
-    return NULL;
+    return s;
 }
 
-void* Memory::GetPointer(addr_t addr, uint16_t length)
+void* Memory::GetPointer(Address addr, uint16_t length)
 {
-    for (TPeripheralList::iterator it = m_peripheral.begin(); it != m_peripheral.end(); it++)
-        if (it->Matches(addr))
-            return NULL;
-
+    auto p = FindPeripheralByAddress(addr);
+    if (p) return nullptr;
     return &m_Memory[addr];
+}
+
+XMemoryMapped* Memory::FindPeripheralByAddress(const Address addr)
+{
+    auto it = std::find_if(m_peripheral.begin(), m_peripheral.end(), [&](const auto& p) {
+        return p.Matches(addr);
+    });
+    return it != m_peripheral.end() ? &it->m_peripheral : nullptr;
 }

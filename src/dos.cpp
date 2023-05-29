@@ -229,10 +229,10 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
             break;
         }
         case 0x3c: /* create/truncate file */ {
-            char* sFilename = oMemory.GetASCIIZString(CPUx86::MakeAddr(DS, DX));
+            const auto sFilename = oMemory.GetASCIIZString(CPUx86::MakeAddr(DS, DX));
             TRACE_INT(
                 "ah=%02x: create/truncate file, cx=%04x ds:dx=%04x:%04x '%s'\n", ah, CX, DS, DX,
-                sFilename);
+                sFilename.c_str());
             // SetError(ErrorCode::FileNotFound);
             AX = 42;
             break;

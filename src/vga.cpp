@@ -34,7 +34,7 @@ void VGA::Reset()
     m_memory.WriteWord(CPUx86::MakeAddr(0x40, 0x63), 0x3d4);       // crt base i/o port
 }
 
-uint8_t VGA::ReadByte(Memory::addr_t addr)
+uint8_t VGA::ReadByte(Memory::Address addr)
 {
     TRACE("read(8) @ 0x%04x\n", addr);
     if (addr >= 0xb8000 && addr <= 0xb8fff) {
@@ -43,13 +43,13 @@ uint8_t VGA::ReadByte(Memory::addr_t addr)
     return 0;
 }
 
-uint16_t VGA::ReadWord(Memory::addr_t addr)
+uint16_t VGA::ReadWord(Memory::Address addr)
 {
     TRACE("read(16) @ 0x%04x\n", addr);
     return ReadByte(addr) | ReadByte(addr + 1) << 8;
 }
 
-void VGA::WriteByte(Memory::addr_t addr, uint8_t data)
+void VGA::WriteByte(Memory::Address addr, uint8_t data)
 {
     TRACE("write(8) @ 0x%04x data=0x%02x\n", addr, data);
     if (addr >= 0xb8000 && addr <= 0xb8fff) {
@@ -57,7 +57,7 @@ void VGA::WriteByte(Memory::addr_t addr, uint8_t data)
     }
 }
 
-void VGA::WriteWord(Memory::addr_t addr, uint16_t data)
+void VGA::WriteWord(Memory::Address addr, uint16_t data)
 {
     TRACE("write(16) @ 0x%04x data=0x%04x\n", addr, data);
     WriteByte(addr, data & 0xff);

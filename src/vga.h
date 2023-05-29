@@ -16,11 +16,11 @@ class VGA : public XMemoryMapped, public XCallableVector
     virtual void Reset();
     virtual void Update();
 
-    virtual uint8_t ReadByte(Memory::addr_t addr);
-    virtual uint16_t ReadWord(Memory::addr_t addr);
+    virtual uint8_t ReadByte(Memory::Address addr);
+    virtual uint16_t ReadWord(Memory::Address addr);
 
-    virtual void WriteByte(Memory::addr_t addr, uint8_t data);
-    virtual void WriteWord(Memory::addr_t addr, uint16_t data);
+    virtual void WriteByte(Memory::Address addr, uint8_t data);
+    virtual void WriteWord(Memory::Address addr, uint16_t data);
 
     // XXX Resolution for now
     static const unsigned int s_video_width = 640;
