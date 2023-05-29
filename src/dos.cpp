@@ -15,7 +15,7 @@
 DOS::DOS(CPUx86& oCPU, Memory& oMemory, Vectors& oVectors)
     : m_CPU(oCPU), m_Memory(oMemory), m_Vectors(oVectors)
 {
-    assert(sizeof(struct ProgramSegmentPrefix) == 256);
+    static_assert(sizeof(struct DOS::ProgramSegmentPrefix) == 256);
 }
 
 void DOS::Reset()
@@ -25,15 +25,24 @@ void DOS::Reset()
     m_Vectors.Register(0x22, *this);
 }
 
-DOS::ErrorCode DOS::LoadEXE(XFile& oFile)
+namespace
 {
-    if (!oFile.IsOpen())
+    template<typename T>
+    bool ReadFromStream(std::ifstream& ifs, T& buffer)
+    {
+        return ifs.read(reinterpret_cast<char*>(&buffer), sizeof(T)) && ifs.gcount() == sizeof(T);
+    }
+}
+
+DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
+{
+    if (!ifs.good())
         return E_FILE_NOT_FOUND;
 
     /* Read EXE Header */
     struct EXEHeader header;
-    oFile.Seek(0);
-    if (oFile.Read((void*)&header, sizeof(header)) != sizeof(header))
+    ifs.seekg(0);
+    if (!ReadFromStream(ifs, header))
         return E_READ_FAULT;
     /* XXX Convert header to native format */
     if (header.eh_signature != DOS_EXEHEADER_SIGNATURE)
@@ -64,29 +73,29 @@ DOS::ErrorCode DOS::LoadEXE(XFile& oFile)
         "cs:ip=%04x:%04x ss:sp=%04x:%04x\n", header.eh_cs, header.eh_ip, header.eh_ss,
         header.eh_sp);
 
-    /* Program data starts after the header; read it completely */
+    // Program data starts after the header; read it completely
     TRACE_EXE(
         "loading %u bytes from offset 0x%x -> %04x:0000 (%x)\n", exe_size,
         header.eh_header_paragraphs * 16, exe_seg, CPUx86::MakeAddr(exe_seg, 0));
-    oFile.Seek(header.eh_header_paragraphs * 16);
+    ifs.seekg(header.eh_header_paragraphs * 16);
     for (unsigned int n = 0; n < exe_size; n++) {
         uint8_t b;
-        if (!oFile.Read((void*)&b, 1))
+        if (!ReadFromStream(ifs, b))
             return E_READ_FAULT; // XXX Is this the correct error code?
         m_Memory.WriteByte(CPUx86::MakeAddr(exe_seg, n), b);
     }
 
     printf(">> DATA %x\n", m_Memory.ReadWord(CPUx86::MakeAddr(0x9d8, 0x814)));
 
-    /* Handle relocations */
-    oFile.Seek(header.eh_reloc_table_offset);
+    // Handle relocations
+    ifs.seekg(header.eh_reloc_table_offset);
     for (unsigned int n = 0; n < header.eh_num_relocs; n++) {
         struct EXERelocation reloc;
-        if (oFile.Read((void*)&reloc, sizeof(reloc)) != sizeof(reloc))
+        if (!ReadFromStream(ifs, reloc))
             return E_READ_FAULT;
         /* XXX Convert relocation to native form */
         // printf("reloc [%x:%x]\n", reloc.er_segment, reloc.er_offset);
-        CPUx86::addr_t reloc_addr = CPUx86::MakeAddr(reloc.er_segment + exe_seg, reloc.er_offset);
+        const auto reloc_addr = CPUx86::MakeAddr(reloc.er_segment + exe_seg, reloc.er_offset);
         m_Memory.WriteWord(reloc_addr, m_Memory.ReadWord(reloc_addr) + exe_seg);
     }
 

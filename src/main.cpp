@@ -55,10 +55,8 @@ int main(int argc, char** argv)
     cpu.SetupForCOM(0x1000);
 
     if (0) {
-        File oFile;
-        if (!oFile.Open("../images/maze.exe", File::FLAG_READ))
-            abort();
-        DOS::ErrorCode err = dos.LoadEXE(oFile);
+        std::ifstream ifs("../images/maze.exe");
+        const auto err = dos.LoadEXE(ifs);
         if (err != DOS::E_SUCCESS) {
             fprintf(stderr, "can't load exe: %u\n", err);
             return 1;
@@ -86,7 +84,7 @@ return 1;
             n = 0;
         }
 
-        if (++m > 100) {
+        if (++m > 10000) {
             memory.WriteWord(0x46c, memory.ReadWord(0x46c) + 1);
             m = 0;
         }

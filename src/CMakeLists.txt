@@ -1,4 +1,4 @@
-add_executable(x86box cpux86.cpp dos.cpp file.cpp hostio.cpp io.cpp main.cpp memory.cpp vectors.cpp vga.cpp keyboard.cpp ${CMAKE_CURRENT_BINARY_DIR}/vgafont.h)
+add_executable(x86box cpux86.cpp dos.cpp hostio.cpp io.cpp main.cpp memory.cpp vectors.cpp vga.cpp keyboard.cpp ${CMAKE_CURRENT_BINARY_DIR}/vgafont.h)
 target_include_directories(x86box PRIVATE ${SDL2_INCLUDE_DIRS})
 target_link_libraries(x86box ${SDL2_LIBRARIES})
 

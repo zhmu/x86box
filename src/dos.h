@@ -1,6 +1,7 @@
 #ifndef __DOS_H__
 #define __DOS_H__
 
+#include <fstream>
 #include <stdint.h>
 #include "xcallablevector.h"
 
@@ -59,7 +60,7 @@ class DOS : public XCallableVector
     };
 
     void Reset();
-    ErrorCode LoadEXE(XFile& oFile);
+    ErrorCode LoadEXE(std::ifstream& ifs);
 
     void InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState);
 
