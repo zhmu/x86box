@@ -1,7 +1,7 @@
 #ifndef __VECTORS_H__
 #define __VECTORS_H__
 
-#include <map>
+#include <unordered_map>
 #include "cpux86.h"
 
 class Memory;
@@ -23,11 +23,7 @@ class Vectors
     void Invoke(CPUx86& oCPU, uint8_t no);
 
   protected:
-    //! \brief Interrupts base address in memory
-    static const unsigned int m_VectorHandlerSegment = 0xf800;
-
-    typedef std::map<unsigned int, XCallableVector&> TintVectorHandlerMap;
-    TintVectorHandlerMap m_Map;
+    std::unordered_map<unsigned int, XCallableVector&> m_Map;
 
     //! \brief Memory used to store the vectors
     Memory& m_Memory;
