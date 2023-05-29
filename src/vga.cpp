@@ -13,17 +13,22 @@
     if (1)          \
     fprintf(stderr, "[vga] " x)
 
+namespace
+{
+    static const unsigned int VideoMemorySize = 262144;
+}
+
 VGA::VGA(Memory& memory, HostIO& hostio, Vectors& vectors)
     : m_memory(memory), m_hostio(hostio), m_vectors(vectors)
 {
-    m_videomem = new uint8_t[m_memorysize];
+    m_videomem = std::make_unique<uint8_t[]>(VideoMemorySize);
 }
 
-VGA::~VGA() { delete[] m_videomem; }
+VGA::~VGA() = default;
 
 void VGA::Reset()
 {
-    memset(m_videomem, 0, m_memorysize);
+    memset(m_videomem.get(), 0, VideoMemorySize);
     m_vectors.Register(0x10, *this);
 
     m_memory.WriteByte(CPUx86::MakeAddr(0x40, 0x49), 3);           // current video mode
@@ -68,9 +73,9 @@ void VGA::Update()
 {
     for (unsigned int y = 0; y < 25; y++)
         for (unsigned int x = 0; x < 80; x++) {
-            uint8_t ch = m_videomem[160 * y + 2 * x + 0];
-            uint8_t cl = m_videomem[160 * y + 2 * x + 1];
-            uint8_t* d = &font_data[ch * 8];
+            const auto ch = m_videomem[160 * y + 2 * x + 0];
+            [[maybe_unused]] const auto cl = m_videomem[160 * y + 2 * x + 1];
+            const auto d = &font_data[ch * 8];
             for (unsigned int j = 0; j < 8; j++)
                 for (unsigned int i = 0; i < 8; i++) {
                     uint32_t color = 0x00ffffff;
@@ -83,10 +88,10 @@ void VGA::Update()
 
 void VGA::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
 {
-#define GET_AL uint8_t al = oState.m_ax & 0xff;
-#define GET_BH uint8_t bh = (oState.m_bx & 0xff00) >> 8;
+    const auto getAl = [&]() { return oState.m_ax & 0xff; };
+    const auto getBh = [&]() { return (oState.m_bx & 0xff00) >> 8; };
 
-    uint8_t ah = (oState.m_ax & 0xff00) >> 8;
+    const uint8_t ah = (oState.m_ax & 0xff00) >> 8;
     switch (ah) {
         case 0x0f:
             TRACE_INT("ah=%02x: get current video mode\n", ah);
@@ -96,14 +101,14 @@ void VGA::InvokeVector(uint8_t no, CPUx86& oCPU, CPUx86::State& oState)
                                                      << 8;
             break;
         case 0x08: {
-            GET_BH;
+            const auto bh = getBh();
             TRACE_INT(
                 "ah=%02x: read character and attribute at cursor position, page=%u\n", ah, bh);
             oState.m_ax = 0x1e20;
             break;
         }
         case 0x11: {
-            GET_AL;
+            const auto al = getAl();
             switch (al) {
                 case 0x30:
                     TRACE_INT("ax=%04x: get font information\n", oState.m_ax);
