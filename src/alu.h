@@ -1,5 +1,6 @@
 #pragma once
 
+#include <numeric> // popcount()
 #include "state.h"
 
 namespace cpu {
