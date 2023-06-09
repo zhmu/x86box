@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <bit>
 #include <utility>
+#include "alu.h"
 
 #define TRACE(x...) \
     if (0) fprintf(stderr, "[cpu] " x)
@@ -30,456 +31,11 @@ void CPUx86::Reset()
     m_State.m_ax = 0x1234;
 }
 
+namespace alu = cpu::alu;
+
 namespace
 {
     auto ModRm_XXX(const uint8_t modRm) { return (modRm >> 3) & 7; }
-
-    template<unsigned int BITS>
-    struct UintOfImpl;
-    template<>
-    struct UintOfImpl<8> {
-        using type = uint8_t;
-    };
-    template<>
-    struct UintOfImpl<16> {
-        using type = uint16_t;
-    };
-    template<>
-    struct UintOfImpl<32> {
-        using type = uint32_t;
-    };
-
-    template<unsigned int BITS>
-    using UintOf = UintOfImpl<BITS>::type;
-
-    template<unsigned int BITS>
-    constexpr void SetFlagsSZP(uint16_t& flags, UintOf<BITS> v);
-
-    template<>
-    constexpr void SetFlagsSZP<8>(uint16_t& flags, uint8_t n)
-    {
-        if (n & 0x80)
-            flags |= cpu::flag::SF;
-        if (n == 0)
-            flags |= cpu::flag::ZF;
-        const uint8_t pf = std::popcount(static_cast<uint8_t>(n & 0xff));
-        if ((pf & 1) == 0) flags |= cpu::flag::PF;
-    }
-
-    template<>
-    constexpr void SetFlagsSZP<16>(uint16_t& flags, uint16_t n)
-    {
-        if (n & 0x8000)
-            flags |= cpu::flag::SF;
-        if (n == 0)
-            flags |= cpu::flag::ZF;
-        // TODO
-        uint8_t pf =
-            ~((n & 0x80) ^ (n & 0x40) ^ (n & 0x20) ^ (n & 0x10) ^ (n & 0x08) ^ (n & 0x04) ^
-              (n & 0x02) ^ (n & 0x01));
-        if (pf & 1)
-            flags |= cpu::flag::PF;
-    }
-
-    template<unsigned int BITS>
-    constexpr void SetFlagsArith(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b, UintOf<2 * BITS> res);
-
-    template<>
-    constexpr void SetFlagsArith<8>(uint16_t& flags, uint8_t a, uint8_t b, uint16_t res)
-    {
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF |
-              cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, res);
-        if (res & 0xff00)
-            flags |= cpu::flag::CF;
-        // https://teaching.idallen.com/dat2343/10f/notes/040_overflow.txt
-        // Overflow can only happen when adding two numbers of the same sign and
-        // getting a different sign.  So, to detect overflow we don't care about
-        // any bits except the sign bits.  Ignore the other bits.
-        const auto sign_a = (a & 0x80) != 0;
-        const auto sign_b = (b & 0x80) != 0;
-        const auto sign_res = (res & 0x80) != 0;
-        if (sign_a == sign_b && sign_res != sign_a)
-            flags |= cpu::flag::OF;
-        if ((a ^ b ^ res) & 0x10)
-            flags |= cpu::flag::AF;
-    }
-
-    template<>
-    constexpr void SetFlagsArith<16>(uint16_t& flags, uint16_t a, uint16_t b, uint32_t res)
-    {
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF |
-              cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, res);
-        if (res & 0xffff0000)
-            flags |= cpu::flag::CF;
-        if ((a ^ res) & (a ^ b) & 0x8000)
-            flags |= cpu::flag::OF;
-        if ((a ^ b ^ res) & 0x10)
-            flags |= cpu::flag::AF;
-    }
-
-    template<unsigned int BITS>
-    [[nodiscard]] constexpr auto ROL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
-    {
-        uint8_t cnt = n % BITS;
-        if (cnt > 0) {
-            v = (v << cnt) | (v >> (BITS - cnt));
-            cpu::SetFlag<cpu::flag::CF>(flags, v & 1);
-        }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
-        return v;
-    }
-
-    template<unsigned int BITS>
-    [[nodiscard]] constexpr auto ROR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
-    {
-        const uint8_t cnt = n % BITS;
-        if (cnt > 0) {
-            v = (v >> cnt) | (v << (BITS - cnt));
-            cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << (BITS - 1)));
-        }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
-        return v;
-    }
-
-    template<unsigned int BITS>
-    [[nodiscard]] constexpr auto RCL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
-    {
-        const uint8_t cnt = (n & 0x1f) % (BITS + 1);
-        if (cnt > 0) {
-            const uint8_t tmp =
-                (v << cnt) | ((cpu::FlagCarry(flags) ? 1 : 0) << (cnt - 1)) | (v >> ((BITS + 1) - cnt));
-            cpu::SetFlag<cpu::flag::CF>(flags, (v >> (BITS - cnt)) & 1);
-            v = tmp;
-        }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
-        return v;
-    }
-
-    template<unsigned int BITS>
-    [[nodiscard]] constexpr auto RCR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
-    {
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
-        const uint8_t cnt = (n & 0x1f) % (BITS + 1);
-        if (cnt == 0)
-            return v;
-        const UintOf<BITS> tmp =
-            (v >> cnt) | ((cpu::FlagCarry(flags) ? 1 : 0)) << (BITS - cnt) | (v << ((BITS + 1) - cnt));
-        cpu::SetFlag<cpu::flag::CF>(flags, (v >> (cnt - 1) & 1));
-        return tmp;
-    }
-
-    template<unsigned int BITS>
-    [[nodiscard]] constexpr auto SHL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
-    {
-        const uint8_t cnt = n & 0x1f;
-        if (cnt < BITS) {
-            if (cnt > 0)
-                cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << (BITS - cnt)));
-            return v << cnt;
-        } else {
-            cpu::SetFlag<cpu::flag::CF>(flags, false);
-            return 0;
-        }
-    }
-
-    template<unsigned int BITS>
-    [[nodiscard]] constexpr auto SHR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
-    {
-        const uint8_t cnt = n & 0x1f;
-        if (cnt < BITS) {
-            if (cnt > 0)
-                cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << cnt));
-            v >>= cnt;
-        } else {
-            v = 0;
-            cpu::SetFlag<cpu::flag::CF>(flags, false);
-        }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
-        SetFlagsSZP<BITS>(flags, v);
-        return v;
-    }
-
-    template<unsigned int BITS>
-    [[nodiscard]] constexpr auto SAR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
-    {
-        uint8_t cnt = n & 0x1f;
-        if (cnt > 0)
-            cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << cnt));
-        if (cnt < BITS) {
-            if (v & (1 << (BITS - 1))) {
-                v = (v >> cnt) | (0xff << (BITS - cnt));
-            } else {
-                v >>= cnt;
-            }
-        } else /* cnt >= BITS */ {
-            if (v & (1 << (BITS - 1))) {
-                cpu::SetFlag<cpu::flag::CF>(flags, true);
-                v = (1 << BITS) - 1;
-            } else {
-                cpu::SetFlag<cpu::flag::CF>(flags, false);
-                v = 0;
-            }
-        }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(flags, 0);
-        SetFlagsSZP<BITS>(flags, v);
-        return v;
-    }
-
-    [[nodiscard]] constexpr uint8_t Add8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        uint16_t res = a + b;
-        SetFlagsArith<8>(flags, a, b, res);
-        return res & 0xff;
-    }
-
-#if 0
-    namespace testing {
-        using VerifyAddTuple = std::tuple<uint8_t, uint8_t, uint16_t, uint8_t>;
-        constexpr bool VerifyAdd8(const VerifyAddTuple& t)
-        {
-            auto [ val1, val2, expected_flags, expected_result ] = t;
-            uint16_t flags = cpu::flag::ON;
-            auto result = Add8(flags, val1, val2);
-            return result == expected_result && flags == expected_flags;
-        }
-        #include "test_add8.cpp"
-    }
-#endif
-
-    [[nodiscard]] constexpr uint16_t Add16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        uint32_t res = a + b;
-        SetFlagsArith<16>(flags, a, b, res);
-        return res & 0xffff;
-    }
-
-    [[nodiscard]] constexpr uint8_t Or8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        uint8_t op1 = a | b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, op1);
-        return op1;
-    }
-
-    [[nodiscard]] constexpr uint16_t Or16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        uint16_t op1 = a | b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, op1);
-        return op1;
-    }
-
-    [[nodiscard]] constexpr uint8_t And8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        uint8_t op1 = a & b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, op1);
-        return op1;
-    }
-
-    [[nodiscard]] constexpr uint16_t And16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        uint16_t op1 = a & b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, op1);
-        return op1;
-    }
-
-    [[nodiscard]] constexpr uint8_t Xor8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        uint8_t op1 = a ^ b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, op1);
-        return op1;
-    }
-
-    [[nodiscard]] constexpr uint16_t Xor16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        uint16_t op1 = a ^ b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, op1);
-        return op1;
-    }
-
-    [[nodiscard]] constexpr uint8_t Adc8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        uint16_t res = a + b + cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<8>(flags, a, b, res);
-        return res & 0xff;
-    }
-
-    [[nodiscard]] constexpr uint16_t Adc16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        uint32_t res = a + b + cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<16>(flags, a, b, res);
-        return res & 0xffff;
-    }
-
-    [[nodiscard]] constexpr uint8_t Sub8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        uint16_t res = a - b;
-        SetFlagsArith<8>(flags, a, b, res);
-        return res & 0xff;
-    }
-
-    [[nodiscard]] constexpr uint16_t Sub16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        uint32_t res = a - b;
-        SetFlagsArith<16>(flags, a, b, res);
-        return res & 0xffff;
-    }
-
-    [[nodiscard]] constexpr uint8_t Sbb8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        uint16_t res = a - b - cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<8>(flags, a, b, res);
-        return res & 0xff;
-    }
-
-    [[nodiscard]] constexpr uint16_t Sbb16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        uint32_t res = a - b - cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<16>(flags, a, b, res);
-        return res & 0xffff;
-    }
-
-    [[nodiscard]] constexpr uint8_t Inc8(uint16_t& flags, uint8_t a)
-    {
-        const auto carry = cpu::FlagCarry(flags);
-        uint8_t res = Add8(flags, a, 1);
-        cpu::SetFlag<cpu::flag::CF>(flags, carry);
-        return res;
-    }
-
-    [[nodiscard]] constexpr uint16_t Inc16(uint16_t& flags, uint16_t a)
-    {
-        const bool carry = cpu::FlagCarry(flags);
-        uint16_t res = Add16(flags, a, 1);
-        cpu::SetFlag<cpu::flag::CF>(flags, carry);
-        return res;
-    }
-
-    [[nodiscard]] constexpr uint8_t Dec8(uint16_t& flags, uint8_t a)
-    {
-        bool carry = cpu::FlagCarry(flags);
-        uint8_t res = Sub8(flags, a, 1);
-        cpu::SetFlag<cpu::flag::CF>(flags, carry);
-        return res;
-    }
-
-    [[nodiscard]] constexpr uint16_t Dec16(uint16_t& flags, uint16_t a)
-    {
-        bool carry = cpu::FlagCarry(flags);
-        uint16_t res = Sub16(flags, a, 1);
-        cpu::SetFlag<cpu::flag::CF>(flags, carry);
-        return res;
-    }
-
-    constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
-    {
-        flags &= ~(cpu::flag::CF | cpu::flag::OF);
-        ax = (ax & 0xff) * (uint16_t)a;
-        if (ax >= 0x100)
-            flags |= (cpu::flag::CF | cpu::flag::OF);
-    }
-
-    constexpr void Mul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
-    {
-        flags &= ~(cpu::flag::CF | cpu::flag::OF);
-        dx = (ax * a) >> 16;
-        ax = (ax * a) & 0xffff;
-        if (dx != 0)
-            flags |= (cpu::flag::CF | cpu::flag::OF);
-    }
-
-    constexpr void Imul8(uint16_t& flags, uint16_t& ax, uint8_t a)
-    {
-        flags &= ~(cpu::flag::CF | cpu::flag::OF);
-        ax = (ax & 0xff) * (uint16_t)a;
-        const uint8_t ah = (ax & 0xff00) >> 8;
-        cpu::SetFlag<cpu::flag::CF | cpu::flag::OF>(flags, ah == 0 || ah == 0xff);
-    }
-
-    constexpr void Imul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
-    {
-        flags &= ~(cpu::flag::CF | cpu::flag::OF);
-        uint32_t res = static_cast<uint32_t>(ax) * static_cast<uint32_t>(a);
-        dx = res >> 16;
-        ax = res & 0xffff;
-        cpu::SetFlag<cpu::flag::CF | cpu::flag::OF>(flags, dx == 0 || dx == 0xffff);
-    }
-
-    // Returns true to signal interrupt
-    [[nodiscard]] constexpr bool Div8(uint16_t& ax, uint8_t a)
-    {
-        if (a == 0)
-            return true;
-        if ((ax / a) > 0xff)
-            return true;
-        ax = ((ax % a) & 0xff) << 8 | ((ax / a) & 0xff);
-        // TODO This does not influence flags??
-        return false;
-    }
-
-    // Returns true to signal interrupt
-    [[nodiscard]] constexpr bool Div16(uint16_t& ax, uint16_t& dx, uint16_t a)
-    {
-        if (a == 0)
-            return true;
-        auto v = (static_cast<uint32_t>(dx) << 16) | static_cast<uint32_t>(ax);
-        if ((v / a) > 0xffff)
-            return true;
-        ax = (v / a) & 0xffff;
-        dx = (v % a) & 0xffff;
-        // TODO This does not influence flags??
-        return false;
-    }
-
-    // Returns true to signal interrupt
-    [[nodiscard]] constexpr bool Idiv8(uint16_t& ax, uint16_t& dx, uint8_t a)
-    {
-        if (a == 0)
-            return true;
-        int8_t res = ax / a;
-        if ((static_cast<int16_t>(ax) > 0 && res > 0x7f) || (static_cast<int16_t>(ax) < 0 && res < 0x80))
-            return true;
-        ax = ((ax % a) & 0xff) << 8 | ((ax / a) & 0xff);
-        // TODO This does not influence flags??
-        return false;
-    }
-
-    // Returns true to signal interrupt
-    [[nodiscard]] constexpr bool Idiv16(uint16_t& ax, uint16_t& dx, uint16_t a)
-    {
-        if (a == 0)
-            return true;
-        int32_t v = (static_cast<uint32_t>(dx) << 16) | static_cast<uint32_t>(ax);
-        if ((v > 0 && (v / a) > 0x7ffff) || (v < 0 && (v / a) < 0x80000))
-            return true;
-        ax = (v / a) & 0xffff;
-        dx = (v % a) & 0xffff;
-        // TODO This does not influence flags??
-        return false;
-    }
 
     constexpr void RelativeJump8(uint16_t& ip, const uint8_t n)
     {
@@ -488,6 +44,7 @@ namespace
         else
             ip += static_cast<uint16_t>(n);
     }
+
 
     constexpr void RelativeJump16(uint16_t& ip, const uint16_t n)
     {
@@ -505,20 +62,33 @@ namespace
         return state.m_seg_override;
     }
 
+    namespace testing {
+        using VerifyAddTuple = std::tuple<uint8_t, uint8_t, cpu::Flags, uint8_t>;
+
+        constexpr bool VerifyAdd8(const VerifyAddTuple& t)
+        {
+            auto [ val1, val2, expected_flags, expected_result ] = t;
+            uint16_t flags = cpu::flag::ON;
+            auto result = alu::Add8(flags, val1, val2);
+            return result == expected_result && flags == expected_flags;
+        }
+
+        constexpr bool VerifySub8(const VerifyAddTuple& t)
+        {
+            auto [ val1, val2, expected_flags, expected_result ] = t;
+            uint16_t flags = cpu::flag::ON;
+            auto result = alu::Sub8(flags, val1, val2);
+            return result == expected_result && flags == expected_flags;
+        }
+
+        //#include "test_add8.inc"
+        //#include "test_sub8.inc"
+    }
+
 }
 
 void CPUx86::RunInstruction()
 {
-#if 0
-    VerifyAddTuple t{ 0x01, 0x0f, 0x0012, 0x10 };
-    auto [ val1, val2, expected_flags, expected_result ] = t;
-    uint16_t flags = cpu::flag::ON;
-    auto result = Add8(flags, val1, val2);
-    printf("result %x == expected_result %x\n", result, expected_result);
-    printf("flags %x == expected_flags %x\n", flags, expected_flags);
-    std::abort();
-#endif
-
     auto getImm8 = [&]() { return GetNextOpcode(); };
     auto getModRm = [&]() { return GetNextOpcode(); };
     auto getImm16 = [&]() -> uint16_t {
@@ -555,14 +125,14 @@ void CPUx86::RunInstruction()
 #define Op_EvGv(op)                 \
     const auto modrm = getModRm();  \
     DecodeEA(modrm, m_DecodeState); \
-    WriteEA16(m_DecodeState, op##16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))))
+    WriteEA16(m_DecodeState, alu::op##16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))))
 
     // op Gv Ev -> Gv = op(Gv, Ev)
 #define Op_GvEv(op)                             \
     const auto modrm = getModRm();              \
     DecodeEA(modrm, m_DecodeState);             \
     uint16_t& reg = GetReg16(ModRm_XXX(modrm)); \
-    reg = op##16(m_State.m_flags, reg, ReadEA16(m_DecodeState))
+    reg = alu::op##16(m_State.m_flags, reg, ReadEA16(m_DecodeState))
 
     // Op Eb Gb -> Eb = op(Eb, Gb)
 #define Op_EbGb(op)                                   \
@@ -570,7 +140,7 @@ void CPUx86::RunInstruction()
     DecodeEA(modrm, m_DecodeState);                   \
     unsigned int shift;                               \
     uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
-    WriteEA8(m_DecodeState, op##8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff))
+    WriteEA8(m_DecodeState, alu::op##8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff))
 
     // Op Gb Eb -> Gb = op(Gb, Eb)
 #define Op_GbEb(op)                                   \
@@ -578,7 +148,7 @@ void CPUx86::RunInstruction()
     DecodeEA(modrm, m_DecodeState);                   \
     unsigned int shift;                               \
     uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
-    SetReg8(reg, shift, op##8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)))
+    SetReg8(reg, shift, alu::op##8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)))
 
 
     const auto opcode = GetNextOpcode();
@@ -602,12 +172,12 @@ void CPUx86::RunInstruction()
         }
         case 0x04: /* ADD AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | Add8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Add8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x05: /* ADD eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = Add16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::Add16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x06: /* PUSH ES */ {
@@ -636,12 +206,12 @@ void CPUx86::RunInstruction()
         }
         case 0x0c: /* OR AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | Or8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Or8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x0d: /* OR eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = Or16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::Or16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x0e: /* PUSH CS */ {
@@ -670,12 +240,12 @@ void CPUx86::RunInstruction()
         }
         case 0x14: /* ADC AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | Adc8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Adc8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x15: /* ADC eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = Adc16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::Adc16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x16: /* PUSH SS */ {
@@ -704,12 +274,12 @@ void CPUx86::RunInstruction()
         }
         case 0x1c: /* SBB AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | Sbb8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Sbb8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x1d: /* SBB eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = Sbb16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::Sbb16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x1e: /* PUSH DS */ {
@@ -738,12 +308,12 @@ void CPUx86::RunInstruction()
         }
         case 0x24: /* AND AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x25: /* AND eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = And16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::And16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x26: /* ES: */ {
@@ -773,12 +343,12 @@ void CPUx86::RunInstruction()
         }
         case 0x2c: /* SUB AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x2d: /* SUB eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = Sub16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::Sub16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x2e: /* CS: */ {
@@ -808,12 +378,12 @@ void CPUx86::RunInstruction()
         }
         case 0x34: /* XOR AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | Xor8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Xor8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x35: /* XOR eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = Xor16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::Xor16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x36: /* SS: */ {
@@ -830,13 +400,13 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _ = Sub8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
+            [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
             break;
         }
         case 0x39: /* CMP Ev Gv */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _  = Sub16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
+            [[maybe_unused]] auto _  = alu::Sub16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
             break;
         }
         case 0x3a: /* CMP Gb Eb */ {
@@ -844,23 +414,23 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _  = Sub8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            [[maybe_unused]] auto _  = alu::Sub8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x3b: /* CMP Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _  = Sub16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            [[maybe_unused]] auto _  = alu::Sub16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x3c: /* CMP AL Ib */ {
             const auto imm = getImm8();
-            [[maybe_unused]] auto _  = Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            [[maybe_unused]] auto _  = alu::Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x3d: /* CMP eAX Iv */ {
             const auto imm = getImm16();
-            [[maybe_unused]] auto _  = Sub16(m_State.m_flags, m_State.m_ax, imm);
+            [[maybe_unused]] auto _  = alu::Sub16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x3e: /* DS: */ {
@@ -873,67 +443,67 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x40: /* INC eAX */ {
-            m_State.m_ax = Inc16(m_State.m_flags, m_State.m_ax);
+            m_State.m_ax = alu::Inc16(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x41: /* INC eCX */ {
-            m_State.m_cx = Inc16(m_State.m_flags, m_State.m_cx);
+            m_State.m_cx = alu::Inc16(m_State.m_flags, m_State.m_cx);
             break;
         }
         case 0x42: /* INC eDX */ {
-            m_State.m_dx = Inc16(m_State.m_flags, m_State.m_dx);
+            m_State.m_dx = alu::Inc16(m_State.m_flags, m_State.m_dx);
             break;
         }
         case 0x43: /* INC eBX */ {
-            m_State.m_bx = Inc16(m_State.m_flags, m_State.m_bx);
+            m_State.m_bx = alu::Inc16(m_State.m_flags, m_State.m_bx);
             break;
         }
         case 0x44: /* INC eSP */ {
-            m_State.m_sp = Inc16(m_State.m_flags, m_State.m_sp);
+            m_State.m_sp = alu::Inc16(m_State.m_flags, m_State.m_sp);
             break;
         }
         case 0x45: /* INC eBP */ {
-            m_State.m_bp = Inc16(m_State.m_flags, m_State.m_bp);
+            m_State.m_bp = alu::Inc16(m_State.m_flags, m_State.m_bp);
             break;
         }
         case 0x46: /* INC eSI */ {
-            m_State.m_si = Inc16(m_State.m_flags, m_State.m_si);
+            m_State.m_si = alu::Inc16(m_State.m_flags, m_State.m_si);
             break;
         }
         case 0x47: /* INC eDI */ {
-            m_State.m_di = Inc16(m_State.m_flags, m_State.m_di);
+            m_State.m_di = alu::Inc16(m_State.m_flags, m_State.m_di);
             break;
         }
         case 0x48: /* DEC eAX */ {
-            m_State.m_ax = Dec16(m_State.m_flags, m_State.m_ax);
+            m_State.m_ax = alu::Dec16(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x49: /* DEC eCX */ {
-            m_State.m_cx = Dec16(m_State.m_flags, m_State.m_cx);
+            m_State.m_cx = alu::Dec16(m_State.m_flags, m_State.m_cx);
             break;
         }
         case 0x4a: /* DEC eDX */ {
-            m_State.m_dx = Dec16(m_State.m_flags, m_State.m_dx);
+            m_State.m_dx = alu::Dec16(m_State.m_flags, m_State.m_dx);
             break;
         }
         case 0x4b: /* DEC eBX */ {
-            m_State.m_bx = Dec16(m_State.m_flags, m_State.m_bx);
+            m_State.m_bx = alu::Dec16(m_State.m_flags, m_State.m_bx);
             break;
         }
         case 0x4c: /* DEC eSP */ {
-            m_State.m_sp = Dec16(m_State.m_flags, m_State.m_sp);
+            m_State.m_sp = alu::Dec16(m_State.m_flags, m_State.m_sp);
             break;
         }
         case 0x4d: /* DEC eBP */ {
-            m_State.m_bp = Dec16(m_State.m_flags, m_State.m_bp);
+            m_State.m_bp = alu::Dec16(m_State.m_flags, m_State.m_bp);
             break;
         }
         case 0x4e: /* DEC eSI */ {
-            m_State.m_si = Dec16(m_State.m_flags, m_State.m_si);
+            m_State.m_si = alu::Dec16(m_State.m_flags, m_State.m_si);
             break;
         }
         case 0x4f: /* DEC eDI */ {
-            m_State.m_di = Dec16(m_State.m_flags, m_State.m_di);
+            m_State.m_di = alu::Dec16(m_State.m_flags, m_State.m_di);
             break;
         }
         case 0x50: /* PUSH eAX */ {
@@ -1142,28 +712,28 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA8(m_DecodeState, Add8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::Add8(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA8(m_DecodeState, Or8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::Or8(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA8(m_DecodeState, Adc8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::Adc8(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA8(m_DecodeState, Sbb8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::Sbb8(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA8(m_DecodeState, And8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::And8(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA8(m_DecodeState, Sub8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::Sub8(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA8(m_DecodeState, Xor8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::Xor8(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, imm);
+                    [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -1177,28 +747,28 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, Add16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Add16(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, Or16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Or16(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, Adc16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Adc16(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, Sbb16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Sbb16(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, And16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::And16(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, Sub16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Sub16(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, Xor16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Xor16(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags, val, imm);
+                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -1212,28 +782,28 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, Add16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Add16(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, Or16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Or16(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, Adc16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Adc16(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, Sbb16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Sbb16(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, And16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::And16(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, Sub16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Sub16(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, Xor16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::Xor16(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags, val, imm);
+                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -1243,13 +813,13 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _ = And8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            [[maybe_unused]] auto _ = alu::And8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x85: /* TEST Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _ = And16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            [[maybe_unused]] auto _ = alu::And16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x86: /* XCHG Gb Eb */ {
@@ -1456,7 +1026,7 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = Sub8(m_State.m_flags,
+                    [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags,
                         m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
@@ -1466,7 +1036,7 @@ void CPUx86::RunInstruction()
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = Sub8(m_State.m_flags,
+                [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -1481,7 +1051,7 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags,
+                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags,
                         m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
@@ -1491,7 +1061,7 @@ void CPUx86::RunInstruction()
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = Sub16(m_State.m_flags,
+                [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -1501,12 +1071,12 @@ void CPUx86::RunInstruction()
         }
         case 0xa8: /* TEST AL Ib */ {
             const auto imm = getImm8();
-            [[maybe_unused]] auto _ = And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            [[maybe_unused]] auto _ = alu::And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0xa9: /* TEST eAX Iv */ {
             const auto imm = getImm16();
-            [[maybe_unused]] auto _ = And16(m_State.m_flags, m_State.m_ax, imm);
+            [[maybe_unused]] auto _ = alu::And16(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0xaa: /* STOSB */ {
@@ -1566,14 +1136,14 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                    [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
@@ -1584,14 +1154,14 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
@@ -1773,28 +1343,28 @@ void CPUx86::RunInstruction()
             uint8_t val = ReadEA8(m_DecodeState);
             switch (op) {
                 case 0: // rol
-                    val = ROL<8>(m_State.m_flags, val, 1);
+                    val = alu::ROL<8>(m_State.m_flags, val, 1);
                     break;
                 case 1: // ror
-                    val = ROR<8>(m_State.m_flags, val, 1);
+                    val = alu::ROR<8>(m_State.m_flags, val, 1);
                     break;
                 case 2: // rcl
-                    val = RCL<8>(m_State.m_flags, val, 1);
+                    val = alu::RCL<8>(m_State.m_flags, val, 1);
                     break;
                 case 3: // rcr
-                    val = RCR<8>(m_State.m_flags, val, 1);
+                    val = alu::RCR<8>(m_State.m_flags, val, 1);
                     break;
                 case 4: // shl
-                    val = SHL<8>(m_State.m_flags, val, 1);
+                    val = alu::SHL<8>(m_State.m_flags, val, 1);
                     break;
                 case 5: // shr
-                    val = SHR<8>(m_State.m_flags, val, 1);
+                    val = alu::SHR<8>(m_State.m_flags, val, 1);
                     break;
                 case 6: // undefined
                     invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR<8>(m_State.m_flags, val, 1);
+                    val = alu::SAR<8>(m_State.m_flags, val, 1);
                     break;
             }
             WriteEA8(m_DecodeState, val);
@@ -1808,28 +1378,28 @@ void CPUx86::RunInstruction()
             uint16_t val = ReadEA16(m_DecodeState);
             switch (op) {
                 case 0: // rol
-                    val = ROL<16>(m_State.m_flags, val, 1);
+                    val = alu::ROL<16>(m_State.m_flags, val, 1);
                     break;
                 case 1: // ror
-                    val = ROR<16>(m_State.m_flags, val, 1);
+                    val = alu::ROR<16>(m_State.m_flags, val, 1);
                     break;
                 case 2: // rcl
-                    val = RCL<16>(m_State.m_flags, val, 1);
+                    val = alu::RCL<16>(m_State.m_flags, val, 1);
                     break;
                 case 3: // rcr
-                    val = RCR<16>(m_State.m_flags, val, 1);
+                    val = alu::RCR<16>(m_State.m_flags, val, 1);
                     break;
                 case 4: // shl
-                    val = SHL<16>(m_State.m_flags, val, 1);
+                    val = alu::SHL<16>(m_State.m_flags, val, 1);
                     break;
                 case 5: // shr
-                    val = SHR<16>(m_State.m_flags, val, 1);
+                    val = alu::SHR<16>(m_State.m_flags, val, 1);
                     break;
                 case 6: // undefined
                     invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR<16>(m_State.m_flags, val, 1);
+                    val = alu::SAR<16>(m_State.m_flags, val, 1);
                     break;
             }
             WriteEA16(m_DecodeState, val);
@@ -1844,28 +1414,28 @@ void CPUx86::RunInstruction()
             uint8_t cnt = m_State.m_cx & 0xff;
             switch (op) {
                 case 0: // rol
-                    val = ROL<8>(m_State.m_flags, val, cnt);
+                    val = alu::ROL<8>(m_State.m_flags, val, cnt);
                     break;
                 case 1: // ror
-                    val = ROR<8>(m_State.m_flags, val, cnt);
+                    val = alu::ROR<8>(m_State.m_flags, val, cnt);
                     break;
                 case 2: // rcl
-                    val = RCL<8>(m_State.m_flags, val, cnt);
+                    val = alu::RCL<8>(m_State.m_flags, val, cnt);
                     break;
                 case 3: // rcr
-                    val = RCR<8>(m_State.m_flags, val, cnt);
+                    val = alu::RCR<8>(m_State.m_flags, val, cnt);
                     break;
                 case 4: // shl
-                    val = SHL<8>(m_State.m_flags, val, cnt);
+                    val = alu::SHL<8>(m_State.m_flags, val, cnt);
                     break;
                 case 5: // shr
-                    val = SHR<8>(m_State.m_flags, val, cnt);
+                    val = alu::SHR<8>(m_State.m_flags, val, cnt);
                     break;
                 case 6: // undefined
                     invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR<8>(m_State.m_flags, val, cnt);
+                    val = alu::SAR<8>(m_State.m_flags, val, cnt);
                     break;
             }
             WriteEA8(m_DecodeState, val);
@@ -1880,28 +1450,28 @@ void CPUx86::RunInstruction()
             uint8_t cnt = m_State.m_cx & 0xff;
             switch (op) {
                 case 0: // rol
-                    val = ROL<16>(m_State.m_flags, val, cnt);
+                    val = alu::ROL<16>(m_State.m_flags, val, cnt);
                     break;
                 case 1: // ror
-                    val = ROR<16>(m_State.m_flags, val, cnt);
+                    val = alu::ROR<16>(m_State.m_flags, val, cnt);
                     break;
                 case 2: // rcl
-                    val = RCL<16>(m_State.m_flags, val, cnt);
+                    val = alu::RCL<16>(m_State.m_flags, val, cnt);
                     break;
                 case 3: // rcr
-                    val = RCR<16>(m_State.m_flags, val, cnt);
+                    val = alu::RCR<16>(m_State.m_flags, val, cnt);
                     break;
                 case 4: // shl
-                    val = SHL<16>(m_State.m_flags, val, cnt);
+                    val = alu::SHL<16>(m_State.m_flags, val, cnt);
                     break;
                 case 5: // shr
-                    val = SHR<16>(m_State.m_flags, val, cnt);
+                    val = alu::SHR<16>(m_State.m_flags, val, cnt);
                     break;
                 case 6: // undefined
                     invalidOpcode();
                     break;
                 case 7: // sar
-                    val = SAR<16>(m_State.m_flags, val, cnt);
+                    val = alu::SAR<16>(m_State.m_flags, val, cnt);
                     break;
             }
             WriteEA16(m_DecodeState, val);
@@ -2064,7 +1634,7 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Ib */ {
                     const auto imm = getImm8();
-                    [[maybe_unused]] auto _ = And8(m_State.m_flags, ReadEA8(m_DecodeState), imm);
+                    [[maybe_unused]] auto _ = alu::And8(m_State.m_flags, ReadEA8(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
@@ -2074,20 +1644,20 @@ void CPUx86::RunInstruction()
                     WriteEA8(m_DecodeState, 0xFF - ReadEA8(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA8(m_DecodeState, Sub8(m_State.m_flags, 0, ReadEA8(m_DecodeState)));
+                    WriteEA8(m_DecodeState, alu::Sub8(m_State.m_flags, 0, ReadEA8(m_DecodeState)));
                     break;
                 case 4: /* MUL */
-                    Mul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
+                    alu::Mul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
                     break;
                 case 5: /* IMUL */
-                    Imul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
+                    alu::Imul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
                     break;
                 case 6: /* DIV */
-                    if (Div8(m_State.m_ax, ReadEA8(m_DecodeState)))
+                    if (alu::Div8(m_State.m_ax, ReadEA8(m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
-                    if (Idiv8(m_State.m_ax, m_State.m_dx, ReadEA8(m_DecodeState)))
+                    if (alu::Idiv8(m_State.m_ax, m_State.m_dx, ReadEA8(m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
@@ -2101,7 +1671,7 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Iw */ {
                     const auto imm = getImm16();
-                    [[maybe_unused]] auto _ = And16(m_State.m_flags, ReadEA16(m_DecodeState), imm);
+                    [[maybe_unused]] auto _ = alu::And16(m_State.m_flags, ReadEA16(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
@@ -2111,20 +1681,20 @@ void CPUx86::RunInstruction()
                     WriteEA16(m_DecodeState, 0xFFFF - ReadEA16(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA16(m_DecodeState, Sub16(m_State.m_flags, 0, ReadEA16(m_DecodeState)));
+                    WriteEA16(m_DecodeState, alu::Sub16(m_State.m_flags, 0, ReadEA16(m_DecodeState)));
                     break;
                 case 4: /* MUL */
-                    Mul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
+                    alu::Mul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
                     break;
                 case 5: /* IMUL */
-                    Imul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
+                    alu::Imul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
                     break;
                 case 6: /* DIV */
-                    if (Div16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
+                    if (alu::Div16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
-                    if (Idiv16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
+                    if (alu::Idiv16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
@@ -2162,10 +1732,10 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // inc
-                    WriteEA8(m_DecodeState, Inc8(m_State.m_flags, val));
+                    WriteEA8(m_DecodeState, alu::Inc8(m_State.m_flags, val));
                     break;
                 case 1: // dec
-                    WriteEA8(m_DecodeState, Dec8(m_State.m_flags, val));
+                    WriteEA8(m_DecodeState, alu::Dec8(m_State.m_flags, val));
                     break;
                 default: // invalid
                     invalidOpcode();
@@ -2181,10 +1751,10 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: /* INC eV */
-                    WriteEA16(m_DecodeState, Inc16(m_State.m_flags, val));
+                    WriteEA16(m_DecodeState, alu::Inc16(m_State.m_flags, val));
                     break;
                 case 1: /* DEC eV */
-                    WriteEA16(m_DecodeState, Dec16(m_State.m_flags, val));
+                    WriteEA16(m_DecodeState, alu::Dec16(m_State.m_flags, val));
                     break;
                 case 2: /* CALL Ev */
                     Push16(m_State.m_ip);

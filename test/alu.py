@@ -80,6 +80,20 @@ def must_set_pf(v):
         if (v & (1 << n)): num_1 += 1
     return (num_1 & 1) == 0
 
+def set_flag(fl, on, flag):
+    if on:
+        fl = fl | flag
+    else:
+        fl = fl & ~flag
+    return fl
+
+
+def set_flags_pzs(v, fl):
+    fl = set_flag(fl, must_set_zf(v), ZF)
+    fl = set_flag(fl, must_set_sf(v), SF)
+    fl = set_flag(fl, must_set_pf(v), PF)
+    return fl
+
 def must_set_ov_add(a, b, res):
     sign_a = (a & 0x80) != 0
     sign_b = (b & 0x80) != 0
@@ -104,31 +118,33 @@ def must_set_ov_sub(a, b, res):
         ov = True
     return ov
 
+def set_flags_sub(a, b, c, res, fl):
+    fl = set_flags_pzs(res, fl)
+    if must_set_ov_sub(a, b, res): fl = fl | OF
+    if (b & 0xf) + c > (a & 0xf):
+        fl = fl | AF
+    return fl
+
+def set_flags_add(a, b, c, res, fl):
+    fl = set_flags_pzs(res, fl)
+    if must_set_ov_add(a, b, res): fl = fl | OF
+    if (b & 0xf) + (a & 0xf) + c >= 0x10:
+        fl = fl | AF
+    return fl
+
 def my_add(a, b, initial_flags):
     fl = initial_flags
     res = (a + b) & 0xffff
     if res & 0xff00: fl = fl | CF
     res = res & 0xff
-    if must_set_zf(res): fl = fl | ZF
-    if must_set_sf(res): fl = fl | SF
-    if must_set_pf(res): fl = fl | PF
-    if must_set_ov_add(a, b, res): fl = fl | OF
-    if (b & 0xf) + (a & 0xf) >= 0x10:
-        fl = fl | AF
-    return (res, fl)
+    return (res, set_flags_add(a, b, 0, res, fl))
 
 def my_sub(a, b, initial_flags):
     fl = initial_flags
     res = (a - b) & 0xffff
     if res & 0xff00: fl = fl | CF
     res = res & 0xff
-    if must_set_zf(res): fl = fl | ZF
-    if must_set_sf(res): fl = fl | SF
-    if must_set_pf(res): fl = fl | PF
-    if must_set_ov_sub(a, b, res): fl = fl | OF
-    if (b & 0xf) > (a & 0xf):
-        fl = fl | AF
-    return (res, fl)
+    return (res, set_flags_sub(a, b, 0, res, fl))
 
 def my_adc(a, b, initial_flags):
     fl = initial_flags
@@ -137,165 +153,96 @@ def my_adc(a, b, initial_flags):
     res = (a + b + c) & 0xffff
     if res & 0xff00: fl = fl | CF
     res = res & 0xff
-    if must_set_zf(res): fl = fl | ZF
-    if must_set_sf(res): fl = fl | SF
-    if must_set_pf(res): fl = fl | PF
-    if must_set_ov_add(a, b, res): fl = fl | OF
-    if (b & 0xf) + (a & 0xf) + c >= 0x10:
-        fl = fl | AF
-    return (res, fl)
+    return (res, set_flags_add(a, b, c, res, fl))
 
 def my_sbb(a, b, initial_flags):
     fl = initial_flags
     c = 1 if initial_flags & CF else 0
     fl = initial_flags & ~CF
     res = (a - b - c) & 0xffff
-    if res & 0xff00: fl = fl | CF
+    fl = set_flag(fl, res & 0xff00, CF)
     res = res & 0xff
-    if must_set_zf(res): fl = fl | ZF
-    if must_set_sf(res): fl = fl | SF
-    if must_set_pf(res): fl = fl | PF
-    if must_set_ov_sub(a, b, res): fl = fl | OF
-    if (b & 0xf) + c > (a & 0xf):
-        fl = fl | AF
-    return (res, fl)
+    return (res, set_flags_sub(a, b, c, res, fl))
 
 def my_shl(a, cnt, initial_flags):
-    temp_cnt = cnt & 0x1f
+    cnt = cnt & 0x1f
+    if cnt == 0:
+        return (a, initial_flags)
+
     new_fl = initial_flags & ~CF
 
     res = a
-    while temp_cnt > 0:
-        if True: # sal or shl
-            if res & 0x80:
-                new_fl = new_fl | CF
-            else:
-                new_fl = new_fl & ~CF
+    for _ in range(0, cnt):
+        new_fl = set_flag(new_fl, res & 0x80, CF)
+        res = (res << 1) & 0xff
 
-        if True: # sal or shl
-            res = (res * 2) & 0xff
-
-        temp_cnt -= 1
-
-    if (cnt & 0x1f) == 1:
-        cf = 0x80 if (new_fl & CF) else 0
-        if True: # sal / shl
-            if (res & 0x80) ^ cf:
-                new_fl = new_fl | OF
-            else:
-                new_fl = new_fl & ~OF
-    elif (cnt & 0x1f) == 0:
-        # no flags changed
-        return (res, initial_flags)
-    else:
-        # OF is undefined...
-        cf = 0x80 if (new_fl & CF) else 0
-        if (res & 0x80) ^ cf:
-            new_fl = new_fl | OF
-
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
+    # OF is undefined if count > 1
+    cf = 0x80 if (new_fl & CF) else 0
+    new_fl = set_flag(new_fl, (res & 0x80) ^ cf, OF)
+    new_fl = set_flags_pzs(res, new_fl)
     return (res, new_fl)
 
 def my_shl1(a, initial_flags):
     return my_shl(a, 1, initial_flags)
 
 def my_shr(a, cnt, initial_flags):
-    temp_cnt = cnt & 0x1f
+    cnt = cnt & 0x1f
+    if cnt == 0:
+        return (a, initial_flags)
+
     new_fl = initial_flags & ~CF
 
     res = a
-    while temp_cnt > 0:
-        if res & 1:
-            new_fl = new_fl | CF
-        else:
-            new_fl = new_fl & ~CF
+    for _ in range(0, cnt):
+        new_fl = set_flag(new_fl, res & 1, CF)
+        res = (res >> 1) & 0xff
 
-        # TODO SAR
-        res = int(res / 2) & 0xff
-
-        temp_cnt -= 1
-
-    if (cnt & 0x1f) == 1:
-        if (a & 0x80):
-            new_fl = new_fl | OF
-        else:
-            new_fl = new_fl & ~OF
-    elif (cnt & 0x1f) == 0:
-        # no flags changed
-        return (res, initial_flags)
+    if cnt == 1:
+        new_fl = set_flag(new_fl, a & 0x80, OF)
     else:
-        # OF is undefined...
+        # OF is undefined, but does not seem to get set
         pass
 
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
-    return (res, new_fl)
+    return (res, set_flags_pzs(res, new_fl))
 
 def my_shr1(a, initial_flags):
     return my_shr(a, 1, initial_flags)
 
 def my_sar(a, cnt, initial_flags):
-    temp_cnt = cnt & 0x1f
+    cnt = cnt & 0x1f
+    if cnt == 0:
+        # no flags changed
+        return (a, initial_flags)
+
     new_fl = initial_flags & ~CF
 
     res = a
-    while temp_cnt > 0:
-        if res & 1:
-            new_fl = new_fl | CF
-        else:
-            new_fl = new_fl & ~CF
+    for _ in range(0, cnt):
+        new_fl = set_flag(new_fl, res & 1, CF)
+        expand = 0x80 if res & 0x80 else 0
+        res = expand | (res >> 1)
 
-        # TODO SAR
-        expand = 0
-        if res & 0x80:
-            expand = 0x80
-        res = expand | (int(res / 2) & 0xff)
-
-        temp_cnt -= 1
-
-    if (cnt & 0x1f) == 1:
-        # OF always off
-        pass
-    elif (cnt & 0x1f) == 0:
-        # no flags changed
-        return (res, initial_flags)
-    else:
-        # OF is undefined...
-        pass
-
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
-    return (res, new_fl)
+    # shifts of 1 always clear OF - otherwise OF is undefined but it always
+    # seems to be cleared...
+    return (res, set_flags_pzs(res, new_fl))
 
 def my_sar1(a, initial_flags):
     return my_sar(a, 1, initial_flags)
 
 def my_rol(a, cnt, initial_flags):
-    temp_cnt = (cnt & 0x1f) % 8
+    cnt = cnt & 0x1f
 
     new_fl = initial_flags
     res = a
-    while temp_cnt > 0:
+    for _ in range(0, cnt % 8):
         temp_cf = 1 if (res & 0x80) != 0 else 0
-        res = ((res * 2) + temp_cf) & 0xff
-        temp_cnt -= 1
+        res = ((res << 1) + temp_cf) & 0xff
 
-    if cnt & 0x1f != 0:
-        if (res & 1):
-            new_fl = new_fl | CF
-        else:
-            new_fl = new_fl & ~CF
-    if cnt & 0x1f > 0:
-        # OF is undefined if != 1, but it is set anyway
+    if cnt > 0:
+        new_fl = set_flag(new_fl, res & 1, CF)
+        # OF is undefined if the count != 1, but it is set anyway
         cf = 0x80 if (new_fl & CF) else 0
-        if (res & 0x80) ^ cf:
-            new_fl = new_fl | OF
-        else:
-            new_fl = new_fl & ~OF
+        new_fl = set_flag(new_fl, (res & 0x80) ^ cf, OF)
 
     return (res, new_fl)
 
@@ -303,28 +250,20 @@ def my_rol1(a, initial_flags):
     return my_rol(a, 1, initial_flags)
 
 def my_ror(a, cnt, initial_flags):
-    temp_cnt = (cnt & 0x1f) % 8
+    cnt = cnt & 0x1f
 
     new_fl = initial_flags
     res = a
-    while temp_cnt > 0:
+    for _ in range(0, cnt % 8):
         temp_cf = 0x80 if (res & 1) != 0 else 0
-        res = (int(res / 2) + temp_cf) & 0xff
-        temp_cnt -= 1
+        res = ((res >> 1) + temp_cf) & 0xff
 
-    if cnt & 0x1f != 0:
-        if (res & 0x80):
-            new_fl = new_fl | CF
-        else:
-            new_fl = new_fl & ~CF
-    if cnt & 0x1f > 0:
+    if cnt > 0:
+        new_fl = set_flag(new_fl, res & 0x80, CF)
         # OF is undefined if != 1, but it is set anyway
         msb_0 = 1 if res & 0x80 else 0
         msb_1 = 1 if res & 0x40 else 0
-        if msb_0 ^ msb_1:
-            new_fl = new_fl | OF
-        else:
-            new_fl = new_fl & ~OF
+        new_fl = set_flag(new_fl, msb_0 ^ msb_1, OF)
 
     return (res, new_fl)
 
@@ -332,58 +271,41 @@ def my_ror1(a, initial_flags):
     return my_ror(a, 1, initial_flags)
 
 def my_rcl(a, cnt, initial_flags):
-    effective_cnt = cnt & 0x1f
-    temp_cnt = effective_cnt % 9
+    cnt = cnt & 0x1f
 
     cf = 1 if (initial_flags & CF) else 0
     new_fl = initial_flags
     res = a
-    while temp_cnt > 0:
+    for _ in range(0, cnt):
         temp_cf = 1 if (res & 0x80) != 0 else 0
-        res = ((res * 2) + cf) & 0xff
+        res = ((res << 1) + cf) & 0xff
         cf = temp_cf
-        temp_cnt -= 1
 
-    if effective_cnt > 0:
+    if cnt > 0:
         # OF is undefined if != 1, but it is set anyway
-        if (a & 0x80) ^ (res & 0x80):
-            new_fl = new_fl | OF
-        else:
-            new_fl = new_fl & ~OF
+        new_fl = set_flag(new_fl, (a & 0x80) ^ (res & 0x80), OF)
 
-    if cf:
-        new_fl = new_fl | CF
-    else:
-        new_fl = new_fl & ~CF
+    new_fl = set_flag(new_fl, cf, CF)
     return (res, new_fl)
 
 def my_rcl1(a, initial_flags):
     return my_rcl(a, 1, initial_flags)
 
 def my_rcr(a, cnt, initial_flags):
-    effective_cnt = cnt & 0x1f
-    temp_cnt = effective_cnt % 9
+    cnt = cnt & 0x1f
 
     new_fl = initial_flags
 
     res = a
     cf = 1 if (initial_flags & CF) else 0
-    while temp_cnt > 0:
+    for _ in range(cnt % 9):
         temp_cf = 1 if (res & 1) != 0 else 0
         res = (res >> 1) + cf * 0x80
         cf = temp_cf
-        temp_cnt -= 1
 
-    if cf:
-        new_fl = new_fl | CF
-    else:
-        new_fl = new_fl & ~CF
-
-    if effective_cnt > 0:
-        if (a & 0x80) ^ (res & 0x80):
-            new_fl = new_fl | OF
-        else:
-            new_fl = new_fl & ~OF
+    new_fl = set_flag(new_fl, cf, CF)
+    if cnt > 0:
+        new_fl = set_flag(new_fl, (a & 0x80) ^ (res & 0x80), OF)
     return (res, new_fl)
 
 def my_rcr1(a, initial_flags):
@@ -391,54 +313,23 @@ def my_rcr1(a, initial_flags):
 
 def my_or(a, b, fl):
     res = a | b
-
-    new_fl = fl
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
-    return (res, new_fl)
+    return (res, set_flags_pzs(res, fl))
 
 def my_and(a, b, fl):
     res = a & b
-
-    new_fl = fl
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
-    return (res, new_fl)
+    return (res, set_flags_pzs(res, fl))
 
 def my_xor(a, b, fl):
     res = a ^ b
-
-    new_fl = fl
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
-    return (res, new_fl)
+    return (res, set_flags_pzs(res, fl))
 
 def my_inc(a, fl):
     res = (a + 1) & 0xff
-
-    new_fl = fl
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
-    if must_set_ov_add(a, 1, res): new_fl = new_fl | OF
-    if (a & 0xf) + 1 >= 0x10:
-        new_fl = new_fl | AF
-    return (res, new_fl)
+    return (res, set_flags_add(a, 1, 0, res, fl))
 
 def my_dec(a, fl):
     res = (a - 1) & 0xff
-
-    new_fl = fl
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
-    if must_set_ov_sub(a, 1, res): new_fl = new_fl | OF
-    if 1 > (a & 0xf):
-        new_fl = new_fl | AF
-    return (res, new_fl)
+    return (res, set_flags_sub(a, 1, 0, res, fl))
 
 def my_neg(a, fl):
     return my_sub(0, a, fl)
@@ -459,9 +350,7 @@ def my_daa(a, fl):
     else:
         new_fl = new_fl & ~CF
 
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
+    new_fl = set_flags_pzs(res, new_fl)
     return (res, new_fl)
 
 def my_das(a, fl):
@@ -480,9 +369,7 @@ def my_das(a, fl):
     else:
         new_fl = new_fl & ~CF
 
-    if must_set_zf(res): new_fl = new_fl | ZF
-    if must_set_sf(res): new_fl = new_fl | SF
-    if must_set_pf(res): new_fl = new_fl | PF
+    new_fl = set_flags_pzs(res, new_fl)
     return (res, new_fl)
 
 def my_aaa(a, fl):
