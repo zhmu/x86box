@@ -40,6 +40,8 @@ namespace alu {
     template<unsigned int BITS>
     constexpr auto CarryMaskOf() { return UintOfImpl<BITS>::CarryMask; }
 
+    static constexpr inline auto MaximumShiftCount = 0x1f;
+
     template<unsigned int BITS>
     constexpr void SetFlagZ(cpu::Flags& flags, const UintOf<BITS> value)
     {
@@ -70,9 +72,10 @@ namespace alu {
     template<unsigned int BITS>
     constexpr bool MustSetOvForAdd(UintOf<BITS> a, UintOf<BITS> b, UintOf<BITS> res)
     {
-        const auto sign_a = (a & MsbMaskOf<BITS>()) != 0;
-        const auto sign_b = (b & MsbMaskOf<BITS>()) != 0;
-        const auto sign_r = (res & MsbMaskOf<BITS>()) != 0;
+        constexpr auto msbMask = MsbMaskOf<BITS>();
+        const auto sign_a = (a & msbMask) != 0;
+        const auto sign_b = (b & msbMask) != 0;
+        const auto sign_r = (res & msbMask) != 0;
         return
             (!sign_a && !sign_b &&  sign_r) ||
             ( sign_a &&  sign_b && !sign_r);
@@ -81,9 +84,10 @@ namespace alu {
     template<unsigned int BITS>
     constexpr bool MustSetOvForSub(UintOf<BITS> a, UintOf<BITS> b, UintOf<BITS> res)
     {
-        const auto sign_a = (a & MsbMaskOf<BITS>()) != 0;
-        const auto sign_b = (b & MsbMaskOf<BITS>()) != 0;
-        const auto sign_r = (res & MsbMaskOf<BITS>()) != 0;
+        constexpr auto msbMask = MsbMaskOf<BITS>();
+        const auto sign_a = (a & msbMask) != 0;
+        const auto sign_b = (b & msbMask) != 0;
+        const auto sign_r = (res & msbMask) != 0;
         return
             (!sign_a &&  sign_b &&  sign_r) ||
             ( sign_a && !sign_b && !sign_r);
@@ -108,21 +112,21 @@ namespace alu {
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto ROL(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
-        constexpr auto LsbMask = LsbMaskOf<BITS>();
-        constexpr auto MsbMask = MsbMaskOf<BITS>();
-        const auto cnt = n & 0x1f;
+        constexpr auto lsbMask = LsbMaskOf<BITS>();
+        constexpr auto msbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & MaximumShiftCount;
 
         auto res = v;
         for(int n = 0; n < cnt; ++n) {
-            auto temp_cf = (res & MsbMask) ? 1 : 0;
+            auto temp_cf = (res & msbMask) ? lsbMask : 0;
             res = ((res << 1) + temp_cf) & MaskOf<BITS>();
         }
 
         if (cnt > 0) {
-            cpu::SetFlag<cpu::flag::CF>(flags, res & LsbMask);
+            cpu::SetFlag<cpu::flag::CF>(flags, res & lsbMask);
             // OF is undefined if the count != 1, but it is set anyway
-            const auto cf = cpu::FlagCarry(flags) ? MsbMask : 0;
-            cpu::SetFlag<cpu::flag::OF>(flags, (res & MsbMask) ^ cf);
+            const auto cf = cpu::FlagCarry(flags) ? msbMask : 0;
+            cpu::SetFlag<cpu::flag::OF>(flags, (res & msbMask) ^ cf);
         }
         return res;
     }
@@ -130,21 +134,21 @@ namespace alu {
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto ROR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
-        constexpr auto LsbMask = LsbMaskOf<BITS>();
-        constexpr auto MsbMask = MsbMaskOf<BITS>();
-        const auto cnt = n & 0x1f;
+        constexpr auto lsbMask = LsbMaskOf<BITS>();
+        constexpr auto msbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & MaximumShiftCount;
 
         auto res = v;
         for(int n = 0; n < cnt % 8; ++n) {
-            auto temp_cf = (res & LsbMask) ? MsbMask : 0;
+            auto temp_cf = (res & lsbMask) ? msbMask : 0;
             res = ((res >> 1) + temp_cf) & MaskOf<BITS>();
         }
 
         if (cnt > 0) {
-            cpu::SetFlag<cpu::flag::CF>(flags, res & MsbMask);
+            cpu::SetFlag<cpu::flag::CF>(flags, res & msbMask);
             // OF is undefined if the count != 1, but it is set anyway
-            const auto msb_0 = (res & MsbMask) ? 1 : 0;
-            const auto msb_1 = (res & (MsbMask >> 1)) ? 1 : 0;
+            const auto msb_0 = (res & msbMask) ? 1 : 0;
+            const auto msb_1 = (res & (msbMask >> 1)) ? 1 : 0;
             cpu::SetFlag<cpu::flag::OF>(flags, msb_0 ^ msb_1);
         }
         return res;
@@ -153,21 +157,21 @@ namespace alu {
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto RCL(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
-        constexpr auto LsbMask = LsbMaskOf<BITS>();
-        constexpr auto MsbMask = MsbMaskOf<BITS>();
-        const auto cnt = n & 0x1f;
+        constexpr auto lsbMask = LsbMaskOf<BITS>();
+        constexpr auto msbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & MaximumShiftCount;
 
-        auto cf = cpu::FlagCarry(flags) ? 1 : 0;
+        auto cf = cpu::FlagCarry(flags) ? lsbMask : 0;
         auto res = v;
         for(int n = 0; n < cnt; ++n) {
-            auto temp_cf = (res & MsbMask) ? 1 : 0;
+            auto temp_cf = (res & msbMask) ? lsbMask : 0;
             res = ((res << 1) + cf) & MaskOf<BITS>();
             cf = temp_cf;
         }
 
         if (cnt > 0) {
             // OF is undefined if the count != 1, but it is set anyway
-            cpu::SetFlag<cpu::flag::OF>(flags, (v & MsbMask) ^ (res & MsbMask));
+            cpu::SetFlag<cpu::flag::OF>(flags, (v & msbMask) ^ (res & msbMask));
         }
         cpu::SetFlag<cpu::flag::CF>(flags, cf);
         return res;
@@ -176,21 +180,21 @@ namespace alu {
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto RCR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
-        constexpr auto LsbMask = LsbMaskOf<BITS>();
-        constexpr auto MsbMask = MsbMaskOf<BITS>();
-        const auto cnt = n & 0x1f;
+        constexpr auto lsbMask = LsbMaskOf<BITS>();
+        constexpr auto msbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & MaximumShiftCount;
 
-        auto cf = cpu::FlagCarry(flags) ? 1 : 0;
+        auto cf = cpu::FlagCarry(flags) ? lsbMask : 0;
         auto res = v;
         for(int n = 0; n < cnt % 9; ++n) {
-            auto temp_cf = (res & LsbMask) ? 1 : 0;
-            res = (res >> 1) + (cf ? MsbMask : 0);
+            auto temp_cf = (res & lsbMask) ? lsbMask : 0;
+            res = (res >> 1) + (cf ? msbMask : 0);
             cf = temp_cf;
         }
 
         if (cnt > 0) {
             // OF is undefined if the count != 1, but it is set anyway
-            cpu::SetFlag<cpu::flag::OF>(flags, (v & MsbMask) ^ (res & MsbMask));
+            cpu::SetFlag<cpu::flag::OF>(flags, (v & msbMask) ^ (res & msbMask));
         }
         cpu::SetFlag<cpu::flag::CF>(flags, cf);
         return res;
@@ -199,21 +203,21 @@ namespace alu {
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto SHL(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
-        const auto cnt = n & 0x1f;
+        const auto cnt = n & MaximumShiftCount;
         if (cnt == 0) return v;
 
         cpu::SetFlag<cpu::flag::CF>(flags, false);
 
-        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        constexpr auto msbMask = MsbMaskOf<BITS>();
         auto res = v;
         for (int n = 0; n < cnt; ++n) {
-            cpu::SetFlag<cpu::flag::CF>(flags, (res & MsbMask) != 0);
+            cpu::SetFlag<cpu::flag::CF>(flags, (res & msbMask) != 0);
             res = (res << 1) & MaskOf<BITS>();
         }
 
         // Formally, OF is undefined if count > 1 - but it seems set regardless
-        const auto cfMask = cpu::FlagCarry(flags) ? MsbMask : 0;
-        cpu::SetFlag<cpu::flag::OF>(flags, (res & MsbMask) ^ cfMask);
+        const auto cfMask = cpu::FlagCarry(flags) ? msbMask : 0;
+        cpu::SetFlag<cpu::flag::OF>(flags, (res & msbMask) ^ cfMask);
         SetFlagsSZP<BITS>(flags, res);
         return res;
     }
@@ -221,21 +225,22 @@ namespace alu {
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto SHR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
-        const auto cnt = n & 0x1f;
+        const auto cnt = n & MaximumShiftCount;
         if (cnt == 0) return v;
 
         cpu::SetFlag<cpu::flag::CF>(flags, false);
 
-        constexpr auto LsbMask = 1;
+        constexpr auto lsbMask = LsbMaskOf<BITS>();
+        constexpr auto msbMask = MsbMaskOf<BITS>();
         auto res = v;
         for (int n = 0; n < cnt; ++n) {
-            cpu::SetFlag<cpu::flag::CF>(flags, (res & LsbMask) != 0);
+            cpu::SetFlag<cpu::flag::CF>(flags, (res & lsbMask) != 0);
             res = (res >> 1) & MaskOf<BITS>();
         }
 
         // Formally, OF is undefined if count > 1 - it does not seem to be set
         if (cnt == 1) {
-            cpu::SetFlag<cpu::flag::OF>(flags, v & MsbMaskOf<BITS>());
+            cpu::SetFlag<cpu::flag::OF>(flags, v & msbMask);
         }
         SetFlagsSZP<BITS>(flags, res);
         return res;
@@ -244,17 +249,17 @@ namespace alu {
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto SAR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
-        const auto cnt = n & 0x1f;
+        const auto cnt = n & MaximumShiftCount;
         if (cnt == 0) return v;
 
         cpu::SetFlag<cpu::flag::CF>(flags, false);
 
-        constexpr auto LsbMask = 1;
-        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        constexpr auto lsbMask = LsbMaskOf<BITS>();
+        constexpr auto msbMask = MsbMaskOf<BITS>();
         auto res = v;
         for (int n = 0; n < cnt; ++n) {
-            cpu::SetFlag<cpu::flag::CF>(flags, (res & LsbMask) != 0);
-            const auto expand = res & MsbMask;
+            cpu::SetFlag<cpu::flag::CF>(flags, (res & lsbMask) != 0);
+            const auto expand = res & msbMask;
             res = expand | (res >> 1);
         }
 
