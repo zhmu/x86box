@@ -343,10 +343,10 @@ namespace
             TestVector{"dec8.bin", "dec", Test8WithCarry{ [](auto& flags, auto a) -> uint8_t {
                 return cpu::alu::DEC<8>(flags, a);
             } } },
-    #if 0
             TestVector{"neg8.bin", "neg", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::Neg8(flags, a);
+                return cpu::alu::NEG<8>(flags, a);
             } } },
+    #if 0
             TestVector{"daa.bin", "daa", Test8{ [](auto& flags, auto a) -> uint8_t {
                 return cpu::alu::Daa(flags, a);
             } } },

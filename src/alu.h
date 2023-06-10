@@ -350,6 +350,12 @@ namespace alu {
         return res;
     }
 
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> NEG(uint16_t& flags, UintOf<BITS> a)
+    {
+        return SUB<BITS>(flags, 0, a);
+    }
+
     constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);

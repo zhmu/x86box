@@ -1644,7 +1644,7 @@ void CPUx86::RunInstruction()
                     WriteEA8(m_DecodeState, 0xFF - ReadEA8(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA8(m_DecodeState, alu::SUB<8>(m_State.m_flags, 0, ReadEA8(m_DecodeState)));
+                    WriteEA8(m_DecodeState, alu::NEG<8>(m_State.m_flags, ReadEA8(m_DecodeState)));
                     break;
                 case 4: /* MUL */
                     alu::Mul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
@@ -1681,7 +1681,7 @@ void CPUx86::RunInstruction()
                     WriteEA16(m_DecodeState, 0xFFFF - ReadEA16(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA16(m_DecodeState, alu::SUB<16>(m_State.m_flags, 0, ReadEA16(m_DecodeState)));
+                    WriteEA16(m_DecodeState, alu::NEG<16>(m_State.m_flags, ReadEA16(m_DecodeState)));
                     break;
                 case 4: /* MUL */
                     alu::Mul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
