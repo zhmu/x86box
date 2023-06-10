@@ -122,52 +122,55 @@ void CPUx86::RunInstruction()
      */
 
     // op Ev Gv -> Ev = op(Ev, Gv)
-#define Op_EvGv(op)                 \
-    const auto modrm = getModRm();  \
-    DecodeEA(modrm, m_DecodeState); \
-    WriteEA16(m_DecodeState, alu::op<16>(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))))
+    auto opEvGv = [&]<typename Fn> (Fn op) {
+        const auto modrm = getModRm();
+        DecodeEA(modrm, m_DecodeState);
+        WriteEA16(m_DecodeState, op(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))));
+    };
 
     // op Gv Ev -> Gv = op(Gv, Ev)
-#define Op_GvEv(op)                             \
-    const auto modrm = getModRm();              \
-    DecodeEA(modrm, m_DecodeState);             \
-    uint16_t& reg = GetReg16(ModRm_XXX(modrm)); \
-    reg = alu::op<16>(m_State.m_flags, reg, ReadEA16(m_DecodeState))
+    auto opGvEv = [&]<typename Fn> (Fn op) {
+        const auto modrm = getModRm();
+        DecodeEA(modrm, m_DecodeState);
+        uint16_t& reg = GetReg16(ModRm_XXX(modrm));
+        reg = op(m_State.m_flags, reg, ReadEA16(m_DecodeState));
+    };
 
     // Op Eb Gb -> Eb = op(Eb, Gb)
-#define Op_EbGb(op)                                   \
-    const auto modrm = getModRm();                    \
-    DecodeEA(modrm, m_DecodeState);                   \
-    unsigned int shift;                               \
-    uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
-    WriteEA8(m_DecodeState, alu::op<8>(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff))
+    auto opEbGb = [&]<typename Fn> (Fn op) {
+        const auto modrm = getModRm();
+        DecodeEA(modrm, m_DecodeState);
+        unsigned int shift;
+        uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
+        WriteEA8(m_DecodeState, op(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff));
+    };
 
     // Op Gb Eb -> Gb = op(Gb, Eb)
-#define Op_GbEb(op)                                   \
-    const auto modrm = getModRm();                    \
-    DecodeEA(modrm, m_DecodeState);                   \
-    unsigned int shift;                               \
-    uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
-    SetReg8(reg, shift, alu::op<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)))
-
+    auto opGbEb = [&]<typename Fn> (Fn op) {
+        const auto modrm = getModRm();
+        DecodeEA(modrm, m_DecodeState);
+        unsigned int shift;
+        uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
+        SetReg8(reg, shift, op(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)));
+    };
 
     const auto opcode = GetNextOpcode();
     TRACE("cs:ip=%04x:%04x opcode 0x%02x\n", m_State.m_cs, m_State.m_ip - 1, opcode);
     switch (opcode) {
         case 0x00: /* ADD Eb Gb */ {
-            Op_EbGb(ADD);
+            opEbGb(cpu::alu::ADD<8>);
             break;
         }
         case 0x01: /* ADD Ev Gv */ {
-            Op_EvGv(ADD);
+            opEvGv(cpu::alu::ADD<16>);
             break;
         }
         case 0x02: /* ADD Gb Eb */ {
-            Op_GbEb(ADD);
+            opGbEb(cpu::alu::ADD<8>);
             break;
         }
         case 0x03: /* ADD Gv Ev */ {
-            Op_GvEv(ADD);
+            opGvEv(cpu::alu::ADD<16>);
             break;
         }
         case 0x04: /* ADD AL Ib */ {
@@ -189,19 +192,19 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x08: /* OR Eb Gb */ {
-            Op_EbGb(OR);
+            opEbGb(cpu::alu::OR<8>);
             break;
         }
         case 0x09: /* OR Ev Gv */ {
-            Op_EvGv(OR);
+            opEvGv(cpu::alu::OR<16>);
             break;
         }
         case 0x0a: /* OR Gb Eb */ {
-            Op_GbEb(OR);
+            opGbEb(cpu::alu::OR<8>);
             break;
         }
         case 0x0b: /* OR Gv Ev */ {
-            Op_GvEv(OR);
+            opGvEv(cpu::alu::OR<16>);
             break;
         }
         case 0x0c: /* OR AL Ib */ {
@@ -223,19 +226,19 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x10: /* ADC Eb Gb */ {
-            Op_EbGb(ADC);
+            opEbGb(cpu::alu::ADC<8>);
             break;
         }
         case 0x11: /* ADC Ev Gv */ {
-            Op_EvGv(ADC);
+            opEvGv(cpu::alu::ADC<16>);
             break;
         }
         case 0x12: /* ADC Gb Eb */ {
-            Op_GbEb(ADC);
+            opGbEb(cpu::alu::ADC<8>);
             break;
         }
         case 0x13: /* ADC Gv Ev */ {
-            Op_GvEv(ADC);
+            opGvEv(cpu::alu::ADC<16>);
             break;
         }
         case 0x14: /* ADC AL Ib */ {
@@ -257,19 +260,19 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x18: /* SBB Eb Gb */ {
-            Op_EbGb(SBB);
+            opEbGb(cpu::alu::SBB<8>);
             break;
         }
         case 0x19: /* SBB Ev Gv */ {
-            Op_EvGv(SBB);
+            opEvGv(cpu::alu::SBB<16>);
             break;
         }
         case 0x1a: /* SBB Gb Eb */ {
-            Op_GbEb(SBB);
+            opGbEb(cpu::alu::SBB<8>);
             break;
         }
         case 0x1b: /* SBB Gv Ev */ {
-            Op_GvEv(SBB);
+            opGvEv(cpu::alu::SBB<16>);
             break;
         }
         case 0x1c: /* SBB AL Ib */ {
@@ -291,19 +294,19 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x20: /* AND Eb Gb */ {
-            Op_EbGb(AND);
+            opEbGb(cpu::alu::AND<8>);
             break;
         }
         case 0x21: /* AND Ev Gv */ {
-            Op_EvGv(AND);
+            opEvGv(cpu::alu::AND<16>);
             break;
         }
         case 0x22: /* AND Gb Eb */ {
-            Op_GbEb(AND);
+            opGbEb(cpu::alu::AND<8>);
             break;
         }
         case 0x23: /* AND Gv Ev */ {
-            Op_GvEv(AND);
+            opGvEv(cpu::alu::AND<16>);
             break;
         }
         case 0x24: /* AND AL Ib */ {
@@ -326,19 +329,19 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x28: /* SUB Eb Gb */ {
-            Op_EbGb(SUB);
+            opEbGb(cpu::alu::SUB<8>);
             break;
         }
         case 0x29: /* SUB Ev Gv */ {
-            Op_EvGv(SUB);
+            opEvGv(cpu::alu::SUB<16>);
             break;
         }
         case 0x2a: /* SUB Gb Eb */ {
-            Op_GbEb(SUB);
+            opGbEb(cpu::alu::SUB<8>);
             break;
         }
         case 0x2b: /* SUB Gv Ev */ {
-            Op_GvEv(SUB);
+            opGvEv(cpu::alu::SUB<16>);
             break;
         }
         case 0x2c: /* SUB AL Ib */ {
@@ -361,19 +364,19 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x30: /* XOR Eb Gb */ {
-            Op_EbGb(XOR);
+            opEbGb(cpu::alu::XOR<8>);
             break;
         }
         case 0x31: /* XOR Ev Gv */ {
-            Op_EvGv(XOR);
+            opEvGv(cpu::alu::XOR<16>);
             break;
         }
         case 0x32: /* XOR Gb Eb */ {
-            Op_GbEb(XOR);
+            opGbEb(cpu::alu::XOR<8>);
             break;
         }
         case 0x33: /* XOR Gv Ev */ {
-            Op_GvEv(XOR);
+            opGvEv(cpu::alu::XOR<16>);
             break;
         }
         case 0x34: /* XOR AL Ib */ {
