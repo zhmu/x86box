@@ -10,224 +10,270 @@ namespace alu {
     template<>
     struct UintOfImpl<8> {
         using type = uint8_t;
+        static const type MsbMask = 0x80;
+        static const type Mask = 0xff;
     };
     template<>
     struct UintOfImpl<16> {
         using type = uint16_t;
+        static const type MsbMask = 0x8000;
+        static const type Mask = 0xffff;
     };
     template<>
     struct UintOfImpl<32> {
         using type = uint32_t;
+        static const type MsbMask = 0x8000'0000;
+        static const type Mask = 0xffff'ffff;
     };
 
     template<unsigned int BITS>
     using UintOf = UintOfImpl<BITS>::type;
+    template<unsigned int BITS>
+    constexpr auto MsbMaskOf() { return UintOfImpl<BITS>::MsbMask; }
+    template<unsigned int BITS>
+    constexpr auto LsbMaskOf() { return UintOf<BITS>{1}; }
+    template<unsigned int BITS>
+    constexpr auto MaskOf() { return UintOfImpl<BITS>::Mask; }
 
     template<unsigned int BITS>
-    constexpr void SetFlagsSZP(uint16_t& flags, UintOf<BITS> v);
-
-    template<>
-    constexpr void SetFlagsSZP<8>(uint16_t& flags, uint8_t n)
+    constexpr void SetFlagZ(cpu::Flags& flags, const UintOf<BITS> value)
     {
-        if (n & 0x80)
-            flags |= cpu::flag::SF;
-        if (n == 0)
-            flags |= cpu::flag::ZF;
-        const uint8_t pf = std::popcount(static_cast<uint8_t>(n & 0xff));
-        if ((pf & 1) == 0) flags |= cpu::flag::PF;
-    }
-
-    template<>
-    constexpr void SetFlagsSZP<16>(uint16_t& flags, uint16_t n)
-    {
-        if (n & 0x8000)
-            flags |= cpu::flag::SF;
-        if (n == 0)
-            flags |= cpu::flag::ZF;
-        // TODO
-        uint8_t pf =
-            ~((n & 0x80) ^ (n & 0x40) ^ (n & 0x20) ^ (n & 0x10) ^ (n & 0x08) ^ (n & 0x04) ^
-              (n & 0x02) ^ (n & 0x01));
-        if (pf & 1)
-            flags |= cpu::flag::PF;
+        cpu::SetFlag<cpu::flag::ZF>(flags, value == 0);
     }
 
     template<unsigned int BITS>
-    constexpr void SetFlagsArith(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b, UintOf<2 * BITS> res);
-
-    template<>
-    constexpr void SetFlagsArith<8>(uint16_t& flags, uint8_t a, uint8_t b, uint16_t res)
+    constexpr void SetFlagS(cpu::Flags& flags, const UintOf<BITS> value)
     {
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF |
-              cpu::flag::AF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, res);
-        if (res & 0xff00)
-            flags |= cpu::flag::CF;
-        // https://teaching.idallen.com/dat2343/10f/notes/040_overflow.txt
-        // Overflow can only happen when adding two numbers of the same sign and
-        // getting a different sign.  So, to detect overflow we don't care about
-        // any bits except the sign bits.  Ignore the other bits.
-        const auto sign_a = (a & 0x80) != 0;
-        const auto sign_b = (b & 0x80) != 0;
-        const auto sign_res = (res & 0x80) != 0;
-        if ((!sign_a && !sign_b &&  sign_res) ||
-            ( sign_a &&  sign_b && !sign_res) ||
-            (!sign_a &&  sign_b &&  sign_res) ||
-            ( sign_a && !sign_b && !sign_res))
-            flags |= cpu::flag::OF;
-
-#if 0
-        if (sign_a == sign_b && sign_res != sign_a)
-            flags |= cpu::flag::OF;
-#endif
-        if ((a ^ b ^ res) & 0x10)
-            flags |= cpu::flag::AF;
+        cpu::SetFlag<cpu::flag::SF>(flags, (value & MsbMaskOf<BITS>()) != 0);
     }
 
-    template<>
-    constexpr void SetFlagsArith<16>(uint16_t& flags, uint16_t a, uint16_t b, uint32_t res)
+    template<unsigned int BITS>
+    constexpr void SetFlagP(cpu::Flags& flags, const UintOf<BITS> value)
     {
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF |
-              cpu::flag::AF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, res);
-        if (res & 0xffff0000)
-            flags |= cpu::flag::CF;
-        if ((a ^ res) & (a ^ b) & 0x8000)
-            flags |= cpu::flag::OF;
-        if ((a ^ b ^ res) & 0x10)
-            flags |= cpu::flag::AF;
+        const auto popcnt = std::popcount(static_cast<uint8_t>(value & 0xff));
+        cpu::SetFlag<cpu::flag::PF>(flags, (popcnt & 1) == 0);
+    }
+
+    template<unsigned int BITS>
+    constexpr void SetFlagsSZP(cpu::Flags& flags, const UintOf<BITS> v)
+    {
+        SetFlagS<BITS>(flags, v);
+        SetFlagZ<BITS>(flags, v);
+        SetFlagP<BITS>(flags, v);
+    }
+
+    template<unsigned int BITS>
+    constexpr bool MustSetOvForAdd(UintOf<BITS> a, UintOf<BITS> b, UintOf<BITS> res)
+    {
+        const auto sign_a = (a & MsbMaskOf<BITS>()) != 0;
+        const auto sign_b = (b & MsbMaskOf<BITS>()) != 0;
+        const auto sign_r = (res & MsbMaskOf<BITS>()) != 0;
+        return
+            (!sign_a && !sign_b &&  sign_r) ||
+            ( sign_a &&  sign_b && !sign_r);
+    }
+
+    template<unsigned int BITS>
+    constexpr bool MustSetOvForSub(UintOf<BITS> a, UintOf<BITS> b, UintOf<BITS> res)
+    {
+        const auto sign_a = (a & MsbMaskOf<BITS>()) != 0;
+        const auto sign_b = (b & MsbMaskOf<BITS>()) != 0;
+        const auto sign_r = (res & MsbMaskOf<BITS>()) != 0;
+        return
+            (!sign_a &&  sign_b &&  sign_r) ||
+            ( sign_a && !sign_b && !sign_r);
+    }
+
+    template<unsigned int BITS>
+    constexpr void SetFlagsForAdd(cpu::Flags& flags, const UintOf<BITS> a, const UintOf<BITS> b, const UintOf<BITS> c, const UintOf<BITS> res)
+    {
+        SetFlagsSZP<BITS>(flags, res);
+        cpu::SetFlag<cpu::flag::OF>(flags, MustSetOvForAdd<BITS>(a, b, res));
+        cpu::SetFlag<cpu::flag::AF>(flags, (b & 0xf) + (a & 0xf) + c >= 0x10);
+    }
+
+    template<unsigned int BITS>
+    constexpr void SetFlagsForSub(cpu::Flags& flags, const UintOf<BITS> a, const UintOf<BITS> b, const UintOf<BITS> c, const UintOf<BITS> res)
+    {
+        SetFlagsSZP<BITS>(flags, res);
+        cpu::SetFlag<cpu::flag::OF>(flags, MustSetOvForSub<BITS>(a, b, res));
+        cpu::SetFlag<cpu::flag::AF>(flags, (b & 0xf) + c > (a & 0xf));
     }
 
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto ROL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
-        uint8_t cnt = n % BITS;
-        if (cnt > 0) {
-            v = (v << cnt) | (v >> (BITS - cnt));
-            cpu::SetFlag<cpu::flag::CF>(flags, v & 1);
+        constexpr auto LsbMask = LsbMaskOf<BITS>();
+        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & 0x1f;
+
+        auto res = v;
+        for(int n = 0; n < cnt; ++n) {
+            auto temp_cf = (res & MsbMask) ? 1 : 0;
+            res = ((res << 1) + temp_cf) & MaskOf<BITS>();
         }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
-        return v;
+
+        if (cnt > 0) {
+            cpu::SetFlag<cpu::flag::CF>(flags, res & LsbMask);
+            // OF is undefined if the count != 1, but it is set anyway
+            const auto cf = cpu::FlagCarry(flags) ? MsbMask : 0;
+            cpu::SetFlag<cpu::flag::OF>(flags, (res & MsbMask) ^ cf);
+        }
+        return res;
     }
 
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto ROR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
-        const uint8_t cnt = n % BITS;
-        if (cnt > 0) {
-            v = (v >> cnt) | (v << (BITS - cnt));
-            cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << (BITS - 1)));
+        constexpr auto LsbMask = LsbMaskOf<BITS>();
+        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & 0x1f;
+
+        auto res = v;
+        for(int n = 0; n < cnt % 8; ++n) {
+            auto temp_cf = (res & LsbMask) ? MsbMask : 0;
+            res = ((res >> 1) + temp_cf) & MaskOf<BITS>();
         }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
-        return v;
+
+        if (cnt > 0) {
+            cpu::SetFlag<cpu::flag::CF>(flags, res & MsbMask);
+            // OF is undefined if the count != 1, but it is set anyway
+            const auto msb_0 = (res & MsbMask) ? 1 : 0;
+            const auto msb_1 = (res & (MsbMask >> 1)) ? 1 : 0;
+            cpu::SetFlag<cpu::flag::OF>(flags, msb_0 ^ msb_1);
+        }
+        return res;
     }
 
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto RCL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
-        const uint8_t cnt = (n & 0x1f) % (BITS + 1);
-        if (cnt > 0) {
-            const uint8_t tmp =
-                (v << cnt) | ((cpu::FlagCarry(flags) ? 1 : 0) << (cnt - 1)) | (v >> ((BITS + 1) - cnt));
-            cpu::SetFlag<cpu::flag::CF>(flags, (v >> (BITS - cnt)) & 1);
-            v = tmp;
+        constexpr auto LsbMask = LsbMaskOf<BITS>();
+        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & 0x1f;
+
+        auto cf = cpu::FlagCarry(flags) ? 1 : 0;
+        auto res = v;
+        for(int n = 0; n < cnt; ++n) {
+            auto temp_cf = (res & MsbMask) ? 1 : 0;
+            res = ((res << 1) + cf) & MaskOf<BITS>();
+            cf = temp_cf;
         }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
-        return v;
+
+        if (cnt > 0) {
+            // OF is undefined if the count != 1, but it is set anyway
+            cpu::SetFlag<cpu::flag::OF>(flags, (v & MsbMask) ^ (res & MsbMask));
+        }
+        cpu::SetFlag<cpu::flag::CF>(flags, cf);
+        return res;
     }
 
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto RCR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(
-                flags, ((v & (1 << (BITS - 1))) ^ (cpu::FlagCarry(flags) ? 1 : 0)));
-        const uint8_t cnt = (n & 0x1f) % (BITS + 1);
-        if (cnt == 0)
-            return v;
-        const UintOf<BITS> tmp =
-            (v >> cnt) | ((cpu::FlagCarry(flags) ? 1 : 0)) << (BITS - cnt) | (v << ((BITS + 1) - cnt));
-        cpu::SetFlag<cpu::flag::CF>(flags, (v >> (cnt - 1) & 1));
-        return tmp;
+        constexpr auto LsbMask = LsbMaskOf<BITS>();
+        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        const auto cnt = n & 0x1f;
+
+        auto cf = cpu::FlagCarry(flags) ? 1 : 0;
+        auto res = v;
+        for(int n = 0; n < cnt % 9; ++n) {
+            auto temp_cf = (res & LsbMask) ? 1 : 0;
+            res = (res >> 1) + (cf ? MsbMask : 0);
+            cf = temp_cf;
+        }
+
+        if (cnt > 0) {
+            // OF is undefined if the count != 1, but it is set anyway
+            cpu::SetFlag<cpu::flag::OF>(flags, (v & MsbMask) ^ (res & MsbMask));
+        }
+        cpu::SetFlag<cpu::flag::CF>(flags, cf);
+        return res;
     }
 
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto SHL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
-        const uint8_t cnt = n & 0x1f;
-        if (cnt < BITS) {
-            if (cnt > 0)
-                cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << (BITS - cnt)));
-            return v << cnt;
-        } else {
-            cpu::SetFlag<cpu::flag::CF>(flags, false);
-            return 0;
+        const auto cnt = n & 0x1f;
+        if (cnt == 0) return v;
+
+        cpu::SetFlag<cpu::flag::CF>(flags, false);
+
+        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        auto res = v;
+        for (int n = 0; n < cnt; ++n) {
+            cpu::SetFlag<cpu::flag::CF>(flags, (res & MsbMask) != 0);
+            res = (res << 1) & MaskOf<BITS>();
         }
+
+        // Formally, OF is undefined if count > 1 - but it seems set regardless
+        const auto cfMask = cpu::FlagCarry(flags) ? MsbMask : 0;
+        cpu::SetFlag<cpu::flag::OF>(flags, (res & MsbMask) ^ cfMask);
+        SetFlagsSZP<BITS>(flags, res);
+        return res;
     }
 
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto SHR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
-        const uint8_t cnt = n & 0x1f;
-        if (cnt < BITS) {
-            if (cnt > 0)
-                cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << cnt));
-            v >>= cnt;
-        } else {
-            v = 0;
-            cpu::SetFlag<cpu::flag::CF>(flags, false);
+        const auto cnt = n & 0x1f;
+        if (cnt == 0) return v;
+
+        cpu::SetFlag<cpu::flag::CF>(flags, false);
+
+        constexpr auto LsbMask = 1;
+        auto res = v;
+        for (int n = 0; n < cnt; ++n) {
+            cpu::SetFlag<cpu::flag::CF>(flags, (res & LsbMask) != 0);
+            res = (res >> 1) & MaskOf<BITS>();
         }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(flags, (v & (1 << (BITS - 1))) ^ (v & (1 << (BITS - 2))));
-        SetFlagsSZP<BITS>(flags, v);
-        return v;
+
+        // Formally, OF is undefined if count > 1 - it does not seem to be set
+        if (cnt == 1) {
+            cpu::SetFlag<cpu::flag::OF>(flags, v & MsbMaskOf<BITS>());
+        }
+        SetFlagsSZP<BITS>(flags, res);
+        return res;
     }
 
     template<unsigned int BITS>
     [[nodiscard]] constexpr auto SAR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
     {
-        uint8_t cnt = n & 0x1f;
-        if (cnt > 0)
-            cpu::SetFlag<cpu::flag::CF>(flags, v & (1 << cnt));
-        if (cnt < BITS) {
-            if (v & (1 << (BITS - 1))) {
-                v = (v >> cnt) | (0xff << (BITS - cnt));
-            } else {
-                v >>= cnt;
-            }
-        } else /* cnt >= BITS */ {
-            if (v & (1 << (BITS - 1))) {
-                cpu::SetFlag<cpu::flag::CF>(flags, true);
-                v = (1 << BITS) - 1;
-            } else {
-                cpu::SetFlag<cpu::flag::CF>(flags, false);
-                v = 0;
-            }
+        const auto cnt = n & 0x1f;
+        if (cnt == 0) return v;
+
+        cpu::SetFlag<cpu::flag::CF>(flags, false);
+
+        constexpr auto LsbMask = 1;
+        constexpr auto MsbMask = MsbMaskOf<BITS>();
+        auto res = v;
+        for (int n = 0; n < cnt; ++n) {
+            cpu::SetFlag<cpu::flag::CF>(flags, (res & LsbMask) != 0);
+            const auto expand = res & MsbMask;
+            res = expand | (res >> 1);
         }
-        if (n == 1)
-            cpu::SetFlag<cpu::flag::OF>(flags, 0);
-        SetFlagsSZP<BITS>(flags, v);
-        return v;
+
+        // Shifts of 1 always clear OF - otherwise OF is undefined but it always
+        // seems to be cleared...
+        SetFlagsSZP<BITS>(flags, res);
+        return res;
     }
 
     [[nodiscard]] constexpr uint8_t Add8(uint16_t& flags, uint8_t a, uint8_t b)
     {
         uint16_t res = a + b;
-        SetFlagsArith<8>(flags, a, b, res);
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
+        res = res & 0xff;
+        SetFlagsForAdd<8>(flags, a, b, 0, res);
         return res & 0xff;
     }
 
     [[nodiscard]] constexpr uint16_t Add16(uint16_t& flags, uint16_t a, uint16_t b)
     {
         uint32_t res = a + b;
-        SetFlagsArith<16>(flags, a, b, res);
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00'0000);
+        res = res & 0xffff;
+        SetFlagsForAdd<16>(flags, a, b, 0, res);
         return res & 0xffff;
     }
 
@@ -287,47 +333,55 @@ namespace alu {
 
     [[nodiscard]] constexpr uint8_t Adc8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint16_t res = a + b + cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<8>(flags, a, b, res);
+        const uint8_t c = cpu::FlagCarry(flags) ? 1 : 0;
+        const uint16_t res = a + b + c;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
+        SetFlagsForAdd<8>(flags, a, b, c, res);
         return res & 0xff;
     }
 
     [[nodiscard]] constexpr uint16_t Adc16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint32_t res = a + b + cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<16>(flags, a, b, res);
+        const uint8_t c = cpu::FlagCarry(flags) ? 1 : 0;
+        const uint16_t res = a + b + c;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xffff'0000);
+        SetFlagsForAdd<16>(flags, a, b, c, res);
         return res & 0xffff;
     }
 
     [[nodiscard]] constexpr uint8_t Sub8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-#if 0
-        return Add8(flags, a, -b);
-#else
         uint16_t res = a - b;
-        SetFlagsArith<8>(flags, a, b, res);
-        return res & 0xff;
-#endif
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
+        res = res & 0xff;
+        SetFlagsForSub<8>(flags, a, b, 0, res);
+        return res;
     }
 
     [[nodiscard]] constexpr uint16_t Sub16(uint16_t& flags, uint16_t a, uint16_t b)
     {
         uint32_t res = a - b;
-        SetFlagsArith<16>(flags, a, b, res);
-        return res & 0xffff;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xffff'0000);
+        res = res & 0xff;
+        SetFlagsForSub<16>(flags, a, b, 0, res);
+        return res;
     }
 
     [[nodiscard]] constexpr uint8_t Sbb8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint16_t res = a - b - cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<8>(flags, a, b, res);
+        const uint8_t c = cpu::FlagCarry(flags) ? 1 : 0;
+        const uint16_t res = a - b - c;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
+        SetFlagsForSub<8>(flags, a, b, c, res);
         return res & 0xff;
     }
 
     [[nodiscard]] constexpr uint16_t Sbb16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint32_t res = a - b - cpu::FlagCarry(flags) ? 1 : 0;
-        SetFlagsArith<16>(flags, a, b, res);
+        const uint16_t c = cpu::FlagCarry(flags) ? 1 : 0;
+        const uint32_t res = a - b - c;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xffff'0000);
+        SetFlagsForSub<16>(flags, a, b, c, res);
         return res & 0xffff;
     }
 
