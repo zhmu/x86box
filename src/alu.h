@@ -106,7 +106,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr auto ROL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    [[nodiscard]] constexpr auto ROL(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
         constexpr auto LsbMask = LsbMaskOf<BITS>();
         constexpr auto MsbMask = MsbMaskOf<BITS>();
@@ -128,7 +128,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr auto ROR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    [[nodiscard]] constexpr auto ROR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
         constexpr auto LsbMask = LsbMaskOf<BITS>();
         constexpr auto MsbMask = MsbMaskOf<BITS>();
@@ -151,7 +151,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr auto RCL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    [[nodiscard]] constexpr auto RCL(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
         constexpr auto LsbMask = LsbMaskOf<BITS>();
         constexpr auto MsbMask = MsbMaskOf<BITS>();
@@ -174,7 +174,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr auto RCR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    [[nodiscard]] constexpr auto RCR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
         constexpr auto LsbMask = LsbMaskOf<BITS>();
         constexpr auto MsbMask = MsbMaskOf<BITS>();
@@ -197,7 +197,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr auto SHL(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    [[nodiscard]] constexpr auto SHL(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
         const auto cnt = n & 0x1f;
         if (cnt == 0) return v;
@@ -219,7 +219,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr auto SHR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    [[nodiscard]] constexpr auto SHR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
         const auto cnt = n & 0x1f;
         if (cnt == 0) return v;
@@ -242,7 +242,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr auto SAR(uint16_t& flags, UintOf<BITS> v, uint8_t n)
+    [[nodiscard]] constexpr auto SAR(cpu::Flags& flags, UintOf<BITS> v, uint8_t n)
     {
         const auto cnt = n & 0x1f;
         if (cnt == 0) return v;
@@ -265,7 +265,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> ADD(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    [[nodiscard]] constexpr UintOf<BITS> ADD(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         UintOf<BITS * 2> res = a + b;
         cpu::SetFlag<cpu::flag::CF>(flags, res & CarryMaskOf<BITS>());
@@ -274,7 +274,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> OR(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    [[nodiscard]] constexpr UintOf<BITS> OR(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         UintOf<BITS> op1 = a | b;
         flags &=
@@ -284,7 +284,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> AND(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    [[nodiscard]] constexpr UintOf<BITS> AND(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         UintOf<BITS> res = a & b;
         flags &=
@@ -294,7 +294,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> XOR(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    [[nodiscard]] constexpr UintOf<BITS> XOR(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         UintOf<BITS> res = a ^ b;
         flags &=
@@ -304,7 +304,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> ADC(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    [[nodiscard]] constexpr UintOf<BITS> ADC(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         const UintOf<BITS> c = cpu::FlagCarry(flags) ? 1 : 0;
         const UintOf<2 * BITS> res = a + b + c;
@@ -314,7 +314,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> SUB(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    [[nodiscard]] constexpr UintOf<BITS> SUB(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         UintOf<BITS * 2> res = a - b;
         cpu::SetFlag<cpu::flag::CF>(flags, res & CarryMaskOf<BITS>());
@@ -323,7 +323,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> SBB(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    [[nodiscard]] constexpr UintOf<BITS> SBB(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         const UintOf<BITS> c = cpu::FlagCarry(flags) ? 1 : 0;
         const UintOf<2 * BITS> res = a - b - c;
@@ -333,7 +333,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> INC(uint16_t& flags, UintOf<BITS> a)
+    [[nodiscard]] constexpr UintOf<BITS> INC(cpu::Flags& flags, UintOf<BITS> a)
     {
         const auto carry = cpu::FlagCarry(flags);
         const auto res = ADD<BITS>(flags, a, 1);
@@ -342,7 +342,7 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> DEC(uint16_t& flags, UintOf<BITS> a)
+    [[nodiscard]] constexpr UintOf<BITS> DEC(cpu::Flags& flags, UintOf<BITS> a)
     {
         const bool carry = cpu::FlagCarry(flags);
         const auto res = SUB<BITS>(flags, a, 1);
@@ -351,19 +351,19 @@ namespace alu {
     }
 
     template<unsigned int BITS>
-    [[nodiscard]] constexpr UintOf<BITS> NEG(uint16_t& flags, UintOf<BITS> a)
+    [[nodiscard]] constexpr UintOf<BITS> NEG(cpu::Flags& flags, UintOf<BITS> a)
     {
         return SUB<BITS>(flags, 0, a);
     }
 
     template<unsigned int BITS>
-    void CMP(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    void CMP(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
         // CMP only cares about the flag bits
         [[maybe_unused]] const auto _ = SUB<BITS>(flags, a, b);
     }
 
-    constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
+    constexpr void Mul8(cpu::Flags& flags, uint16_t& ax, uint8_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);
         ax = (ax & 0xff) * (uint16_t)a;
@@ -371,7 +371,7 @@ namespace alu {
             flags |= (cpu::flag::CF | cpu::flag::OF);
     }
 
-    constexpr void Mul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
+    constexpr void Mul16(cpu::Flags& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);
         dx = (ax * a) >> 16;
@@ -380,7 +380,7 @@ namespace alu {
             flags |= (cpu::flag::CF | cpu::flag::OF);
     }
 
-    constexpr void Imul8(uint16_t& flags, uint16_t& ax, uint8_t a)
+    constexpr void Imul8(cpu::Flags& flags, uint16_t& ax, uint8_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);
         ax = (ax & 0xff) * (uint16_t)a;
@@ -388,7 +388,7 @@ namespace alu {
         cpu::SetFlag<cpu::flag::CF | cpu::flag::OF>(flags, ah == 0 || ah == 0xff);
     }
 
-    constexpr void Imul16(uint16_t& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
+    constexpr void Imul16(cpu::Flags& flags, uint16_t& ax, uint16_t& dx, uint16_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);
         uint32_t res = static_cast<uint32_t>(ax) * static_cast<uint32_t>(a);
