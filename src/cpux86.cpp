@@ -400,13 +400,13 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
+            alu::CMP<8>(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
             break;
         }
         case 0x39: /* CMP Ev Gv */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _  = alu::SUB<16>(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
+            alu::CMP<16>(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
             break;
         }
         case 0x3a: /* CMP Gb Eb */ {
@@ -414,23 +414,23 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _  = alu::SUB<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            alu::CMP<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x3b: /* CMP Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _  = alu::SUB<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            alu::CMP<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x3c: /* CMP AL Ib */ {
             const auto imm = getImm8();
-            [[maybe_unused]] auto _  = alu::SUB<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            alu::CMP<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x3d: /* CMP eAX Iv */ {
             const auto imm = getImm16();
-            [[maybe_unused]] auto _  = alu::SUB<16>(m_State.m_flags, m_State.m_ax, imm);
+            alu::CMP<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x3e: /* DS: */ {

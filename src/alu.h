@@ -356,6 +356,13 @@ namespace alu {
         return SUB<BITS>(flags, 0, a);
     }
 
+    template<unsigned int BITS>
+    void CMP(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        // CMP only cares about the flag bits
+        [[maybe_unused]] const auto _ = SUB<BITS>(flags, a, b);
+    }
+
     constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);
