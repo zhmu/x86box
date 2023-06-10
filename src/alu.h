@@ -12,18 +12,21 @@ namespace alu {
         using type = uint8_t;
         static const type MsbMask = 0x80;
         static const type Mask = 0xff;
+        static const auto CarryMask = 0xffff'00;
     };
     template<>
     struct UintOfImpl<16> {
         using type = uint16_t;
         static const type MsbMask = 0x8000;
         static const type Mask = 0xffff;
+        static const auto CarryMask = 0xffff'0000;
     };
     template<>
     struct UintOfImpl<32> {
         using type = uint32_t;
         static const type MsbMask = 0x8000'0000;
         static const type Mask = 0xffff'ffff;
+        static const auto CarryMask = 0xffff'0000'0000;
     };
 
     template<unsigned int BITS>
@@ -34,6 +37,8 @@ namespace alu {
     constexpr auto LsbMaskOf() { return UintOf<BITS>{1}; }
     template<unsigned int BITS>
     constexpr auto MaskOf() { return UintOfImpl<BITS>::Mask; }
+    template<unsigned int BITS>
+    constexpr auto CarryMaskOf() { return UintOfImpl<BITS>::CarryMask; }
 
     template<unsigned int BITS>
     constexpr void SetFlagZ(cpu::Flags& flags, const UintOf<BITS> value)
@@ -259,162 +264,180 @@ namespace alu {
         return res;
     }
 
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> ADD(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        UintOf<BITS * 2> res = a + b;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & CarryMaskOf<BITS>());
+        SetFlagsForAdd<BITS>(flags, a, b, 0, res);
+        return res & MaskOf<BITS>();
+    }
+
     [[nodiscard]] constexpr uint8_t Add8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint16_t res = a + b;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
-        res = res & 0xff;
-        SetFlagsForAdd<8>(flags, a, b, 0, res);
-        return res & 0xff;
+        return ADD<8>(flags, a, b);
     }
 
     [[nodiscard]] constexpr uint16_t Add16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint32_t res = a + b;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00'0000);
-        res = res & 0xffff;
-        SetFlagsForAdd<16>(flags, a, b, 0, res);
-        return res & 0xffff;
+        return ADD<16>(flags, a, b);
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> OR(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        UintOf<BITS> op1 = a | b;
+        flags &=
+            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
+        SetFlagsSZP<8>(flags, op1);
+        return op1;
     }
 
     [[nodiscard]] constexpr uint8_t Or8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint8_t op1 = a | b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, op1);
-        return op1;
+        return OR<8>(flags, a, b);
     }
 
     [[nodiscard]] constexpr uint16_t Or16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint16_t op1 = a | b;
+        return OR<16>(flags, a, b);
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> AND(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        UintOf<BITS> res = a & b;
         flags &=
             ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, op1);
-        return op1;
+        SetFlagsSZP<BITS>(flags, res);
+        return res;
     }
 
     [[nodiscard]] constexpr uint8_t And8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint8_t op1 = a & b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, op1);
-        return op1;
+        return AND<8>(flags, a, b);
     }
 
     [[nodiscard]] constexpr uint16_t And16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint16_t op1 = a & b;
+        return AND<16>(flags, a, b);
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> XOR(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        UintOf<BITS> res = a ^ b;
         flags &=
             ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, op1);
-        return op1;
+        SetFlagsSZP<BITS>(flags, res);
+        return res;
     }
 
     [[nodiscard]] constexpr uint8_t Xor8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint8_t op1 = a ^ b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, op1);
-        return op1;
+        return XOR<8>(flags, a, b);
     }
 
     [[nodiscard]] constexpr uint16_t Xor16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint16_t op1 = a ^ b;
-        flags &=
-            ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<16>(flags, op1);
-        return op1;
+        return XOR<16>(flags, a, b);
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> ADC(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        const UintOf<BITS> c = cpu::FlagCarry(flags) ? 1 : 0;
+        const UintOf<2 * BITS> res = a + b + c;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & CarryMaskOf<BITS>());
+        SetFlagsForAdd<BITS>(flags, a, b, c, res);
+        return res & MaskOf<BITS>();
     }
 
     [[nodiscard]] constexpr uint8_t Adc8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        const uint8_t c = cpu::FlagCarry(flags) ? 1 : 0;
-        const uint16_t res = a + b + c;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
-        SetFlagsForAdd<8>(flags, a, b, c, res);
-        return res & 0xff;
+        return ADC<8>(flags, a, b);
     }
 
     [[nodiscard]] constexpr uint16_t Adc16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        const uint8_t c = cpu::FlagCarry(flags) ? 1 : 0;
-        const uint16_t res = a + b + c;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xffff'0000);
-        SetFlagsForAdd<16>(flags, a, b, c, res);
-        return res & 0xffff;
+        return ADC<16>(flags, a, b);
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> SUB(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        UintOf<BITS * 2> res = a - b;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & CarryMaskOf<BITS>());
+        SetFlagsForSub<BITS>(flags, a, b, 0, res);
+        return res & MaskOf<BITS>();
     }
 
     [[nodiscard]] constexpr uint8_t Sub8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        uint16_t res = a - b;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
-        res = res & 0xff;
-        SetFlagsForSub<8>(flags, a, b, 0, res);
-        return res;
+        return SUB<8>(flags, a, b);
     }
 
     [[nodiscard]] constexpr uint16_t Sub16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        uint32_t res = a - b;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xffff'0000);
-        res = res & 0xff;
-        SetFlagsForSub<16>(flags, a, b, 0, res);
-        return res;
+        return SUB<16>(flags, a, b);
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> SBB(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        const UintOf<BITS> c = cpu::FlagCarry(flags) ? 1 : 0;
+        const UintOf<2 * BITS> res = a - b - c;
+        cpu::SetFlag<cpu::flag::CF>(flags, res & CarryMaskOf<BITS>());
+        SetFlagsForSub<BITS>(flags, a, b, c, res);
+        return res & MaskOf<BITS>();
     }
 
     [[nodiscard]] constexpr uint8_t Sbb8(uint16_t& flags, uint8_t a, uint8_t b)
     {
-        const uint8_t c = cpu::FlagCarry(flags) ? 1 : 0;
-        const uint16_t res = a - b - c;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xff00);
-        SetFlagsForSub<8>(flags, a, b, c, res);
-        return res & 0xff;
+        return SBB<8>(flags, a, b);
     }
 
     [[nodiscard]] constexpr uint16_t Sbb16(uint16_t& flags, uint16_t a, uint16_t b)
     {
-        const uint16_t c = cpu::FlagCarry(flags) ? 1 : 0;
-        const uint32_t res = a - b - c;
-        cpu::SetFlag<cpu::flag::CF>(flags, res & 0xffff'0000);
-        SetFlagsForSub<16>(flags, a, b, c, res);
-        return res & 0xffff;
+        return SBB<16>(flags, a, b);
     }
 
-    [[nodiscard]] constexpr uint8_t Inc8(uint16_t& flags, uint8_t a)
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> INC(uint16_t& flags, UintOf<BITS> a)
     {
         const auto carry = cpu::FlagCarry(flags);
-        uint8_t res = Add8(flags, a, 1);
+        const auto res = ADD<BITS>(flags, a, 1);
         cpu::SetFlag<cpu::flag::CF>(flags, carry);
         return res;
     }
 
+    [[nodiscard]] constexpr uint8_t Inc8(uint16_t& flags, uint8_t a)
+    {
+        return INC<8>(flags, a);
+    }
+
     [[nodiscard]] constexpr uint16_t Inc16(uint16_t& flags, uint16_t a)
     {
+        return INC<16>(flags, a);
+    }
+
+    template<unsigned int BITS>
+    [[nodiscard]] constexpr UintOf<BITS> DEC(uint16_t& flags, UintOf<BITS> a)
+    {
         const bool carry = cpu::FlagCarry(flags);
-        uint16_t res = Add16(flags, a, 1);
+        const auto res = SUB<BITS>(flags, a, 1);
         cpu::SetFlag<cpu::flag::CF>(flags, carry);
         return res;
     }
 
     [[nodiscard]] constexpr uint8_t Dec8(uint16_t& flags, uint8_t a)
     {
-        bool carry = cpu::FlagCarry(flags);
-        uint8_t res = Sub8(flags, a, 1);
-        cpu::SetFlag<cpu::flag::CF>(flags, carry);
-        return res;
+        return DEC<8>(flags, a);
     }
 
     [[nodiscard]] constexpr uint16_t Dec16(uint16_t& flags, uint16_t a)
     {
-        bool carry = cpu::FlagCarry(flags);
-        uint16_t res = Sub16(flags, a, 1);
-        cpu::SetFlag<cpu::flag::CF>(flags, carry);
-        return res;
+        return DEC<16>(flags, a);
     }
 
     constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
