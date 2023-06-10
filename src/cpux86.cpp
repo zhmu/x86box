@@ -69,7 +69,7 @@ namespace
         {
             auto [ val1, val2, expected_flags, expected_result ] = t;
             uint16_t flags = cpu::flag::ON;
-            auto result = alu::Add8(flags, val1, val2);
+            auto result = alu::ADD<8>(flags, val1, val2);
             return result == expected_result && flags == expected_flags;
         }
 
@@ -77,7 +77,7 @@ namespace
         {
             auto [ val1, val2, expected_flags, expected_result ] = t;
             uint16_t flags = cpu::flag::ON;
-            auto result = alu::Sub8(flags, val1, val2);
+            auto result = alu::SUB<8>(flags, val1, val2);
             return result == expected_result && flags == expected_flags;
         }
 
@@ -125,14 +125,14 @@ void CPUx86::RunInstruction()
 #define Op_EvGv(op)                 \
     const auto modrm = getModRm();  \
     DecodeEA(modrm, m_DecodeState); \
-    WriteEA16(m_DecodeState, alu::op##16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))))
+    WriteEA16(m_DecodeState, alu::op<16>(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))))
 
     // op Gv Ev -> Gv = op(Gv, Ev)
 #define Op_GvEv(op)                             \
     const auto modrm = getModRm();              \
     DecodeEA(modrm, m_DecodeState);             \
     uint16_t& reg = GetReg16(ModRm_XXX(modrm)); \
-    reg = alu::op##16(m_State.m_flags, reg, ReadEA16(m_DecodeState))
+    reg = alu::op<16>(m_State.m_flags, reg, ReadEA16(m_DecodeState))
 
     // Op Eb Gb -> Eb = op(Eb, Gb)
 #define Op_EbGb(op)                                   \
@@ -140,7 +140,7 @@ void CPUx86::RunInstruction()
     DecodeEA(modrm, m_DecodeState);                   \
     unsigned int shift;                               \
     uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
-    WriteEA8(m_DecodeState, alu::op##8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff))
+    WriteEA8(m_DecodeState, alu::op<8>(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff))
 
     // Op Gb Eb -> Gb = op(Gb, Eb)
 #define Op_GbEb(op)                                   \
@@ -148,36 +148,36 @@ void CPUx86::RunInstruction()
     DecodeEA(modrm, m_DecodeState);                   \
     unsigned int shift;                               \
     uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift); \
-    SetReg8(reg, shift, alu::op##8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)))
+    SetReg8(reg, shift, alu::op<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)))
 
 
     const auto opcode = GetNextOpcode();
     TRACE("cs:ip=%04x:%04x opcode 0x%02x\n", m_State.m_cs, m_State.m_ip - 1, opcode);
     switch (opcode) {
         case 0x00: /* ADD Eb Gb */ {
-            Op_EbGb(Add);
+            Op_EbGb(ADD);
             break;
         }
         case 0x01: /* ADD Ev Gv */ {
-            Op_EvGv(Add);
+            Op_EvGv(ADD);
             break;
         }
         case 0x02: /* ADD Gb Eb */ {
-            Op_GbEb(Add);
+            Op_GbEb(ADD);
             break;
         }
         case 0x03: /* ADD Gv Ev */ {
-            Op_GvEv(Add);
+            Op_GvEv(ADD);
             break;
         }
         case 0x04: /* ADD AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Add8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::ADD<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x05: /* ADD eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = alu::Add16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::ADD<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x06: /* PUSH ES */ {
@@ -189,29 +189,29 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x08: /* OR Eb Gb */ {
-            Op_EbGb(Or);
+            Op_EbGb(OR);
             break;
         }
         case 0x09: /* OR Ev Gv */ {
-            Op_EvGv(Or);
+            Op_EvGv(OR);
             break;
         }
         case 0x0a: /* OR Gb Eb */ {
-            Op_GbEb(Or);
+            Op_GbEb(OR);
             break;
         }
         case 0x0b: /* OR Gv Ev */ {
-            Op_GvEv(Or);
+            Op_GvEv(OR);
             break;
         }
         case 0x0c: /* OR AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Or8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::OR<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x0d: /* OR eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = alu::Or16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::OR<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x0e: /* PUSH CS */ {
@@ -223,29 +223,29 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x10: /* ADC Eb Gb */ {
-            Op_EbGb(Adc);
+            Op_EbGb(ADC);
             break;
         }
         case 0x11: /* ADC Ev Gv */ {
-            Op_EvGv(Adc);
+            Op_EvGv(ADC);
             break;
         }
         case 0x12: /* ADC Gb Eb */ {
-            Op_GbEb(Adc);
+            Op_GbEb(ADC);
             break;
         }
         case 0x13: /* ADC Gv Ev */ {
-            Op_GvEv(Adc);
+            Op_GvEv(ADC);
             break;
         }
         case 0x14: /* ADC AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Adc8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::ADC<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x15: /* ADC eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = alu::Adc16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::ADC<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x16: /* PUSH SS */ {
@@ -257,29 +257,29 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x18: /* SBB Eb Gb */ {
-            Op_EbGb(Sbb);
+            Op_EbGb(SBB);
             break;
         }
         case 0x19: /* SBB Ev Gv */ {
-            Op_EvGv(Sbb);
+            Op_EvGv(SBB);
             break;
         }
         case 0x1a: /* SBB Gb Eb */ {
-            Op_GbEb(Sbb);
+            Op_GbEb(SBB);
             break;
         }
         case 0x1b: /* SBB Gv Ev */ {
-            Op_GvEv(Sbb);
+            Op_GvEv(SBB);
             break;
         }
         case 0x1c: /* SBB AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Sbb8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::SBB<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x1d: /* SBB eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = alu::Sbb16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::SBB<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x1e: /* PUSH DS */ {
@@ -291,29 +291,29 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x20: /* AND Eb Gb */ {
-            Op_EbGb(And);
+            Op_EbGb(AND);
             break;
         }
         case 0x21: /* AND Ev Gv */ {
-            Op_EvGv(And);
+            Op_EvGv(AND);
             break;
         }
         case 0x22: /* AND Gb Eb */ {
-            Op_GbEb(And);
+            Op_GbEb(AND);
             break;
         }
         case 0x23: /* AND Gv Ev */ {
-            Op_GvEv(And);
+            Op_GvEv(AND);
             break;
         }
         case 0x24: /* AND AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::AND<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x25: /* AND eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = alu::And16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::AND<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x26: /* ES: */ {
@@ -326,29 +326,29 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x28: /* SUB Eb Gb */ {
-            Op_EbGb(Sub);
+            Op_EbGb(SUB);
             break;
         }
         case 0x29: /* SUB Ev Gv */ {
-            Op_EvGv(Sub);
+            Op_EvGv(SUB);
             break;
         }
         case 0x2a: /* SUB Gb Eb */ {
-            Op_GbEb(Sub);
+            Op_GbEb(SUB);
             break;
         }
         case 0x2b: /* SUB Gv Ev */ {
-            Op_GvEv(Sub);
+            Op_GvEv(SUB);
             break;
         }
         case 0x2c: /* SUB AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::SUB<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x2d: /* SUB eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = alu::Sub16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::SUB<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x2e: /* CS: */ {
@@ -361,29 +361,29 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x30: /* XOR Eb Gb */ {
-            Op_EbGb(Xor);
+            Op_EbGb(XOR);
             break;
         }
         case 0x31: /* XOR Ev Gv */ {
-            Op_EvGv(Xor);
+            Op_EvGv(XOR);
             break;
         }
         case 0x32: /* XOR Gb Eb */ {
-            Op_GbEb(Xor);
+            Op_GbEb(XOR);
             break;
         }
         case 0x33: /* XOR Gv Ev */ {
-            Op_GvEv(Xor);
+            Op_GvEv(XOR);
             break;
         }
         case 0x34: /* XOR AL Ib */ {
             const auto imm = getImm8();
-            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::Xor8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::XOR<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x35: /* XOR eAX Iv */ {
             const auto imm = getImm16();
-            m_State.m_ax = alu::Xor16(m_State.m_flags, m_State.m_ax, imm);
+            m_State.m_ax = alu::XOR<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x36: /* SS: */ {
@@ -400,13 +400,13 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
+            [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
             break;
         }
         case 0x39: /* CMP Ev Gv */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _  = alu::Sub16(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
+            [[maybe_unused]] auto _  = alu::SUB<16>(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
             break;
         }
         case 0x3a: /* CMP Gb Eb */ {
@@ -414,23 +414,23 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _  = alu::Sub8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            [[maybe_unused]] auto _  = alu::SUB<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x3b: /* CMP Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _  = alu::Sub16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            [[maybe_unused]] auto _  = alu::SUB<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x3c: /* CMP AL Ib */ {
             const auto imm = getImm8();
-            [[maybe_unused]] auto _  = alu::Sub8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            [[maybe_unused]] auto _  = alu::SUB<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0x3d: /* CMP eAX Iv */ {
             const auto imm = getImm16();
-            [[maybe_unused]] auto _  = alu::Sub16(m_State.m_flags, m_State.m_ax, imm);
+            [[maybe_unused]] auto _  = alu::SUB<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0x3e: /* DS: */ {
@@ -443,67 +443,67 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x40: /* INC eAX */ {
-            m_State.m_ax = alu::Inc16(m_State.m_flags, m_State.m_ax);
+            m_State.m_ax = alu::INC<16>(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x41: /* INC eCX */ {
-            m_State.m_cx = alu::Inc16(m_State.m_flags, m_State.m_cx);
+            m_State.m_cx = alu::INC<16>(m_State.m_flags, m_State.m_cx);
             break;
         }
         case 0x42: /* INC eDX */ {
-            m_State.m_dx = alu::Inc16(m_State.m_flags, m_State.m_dx);
+            m_State.m_dx = alu::INC<16>(m_State.m_flags, m_State.m_dx);
             break;
         }
         case 0x43: /* INC eBX */ {
-            m_State.m_bx = alu::Inc16(m_State.m_flags, m_State.m_bx);
+            m_State.m_bx = alu::INC<16>(m_State.m_flags, m_State.m_bx);
             break;
         }
         case 0x44: /* INC eSP */ {
-            m_State.m_sp = alu::Inc16(m_State.m_flags, m_State.m_sp);
+            m_State.m_sp = alu::INC<16>(m_State.m_flags, m_State.m_sp);
             break;
         }
         case 0x45: /* INC eBP */ {
-            m_State.m_bp = alu::Inc16(m_State.m_flags, m_State.m_bp);
+            m_State.m_bp = alu::INC<16>(m_State.m_flags, m_State.m_bp);
             break;
         }
         case 0x46: /* INC eSI */ {
-            m_State.m_si = alu::Inc16(m_State.m_flags, m_State.m_si);
+            m_State.m_si = alu::INC<16>(m_State.m_flags, m_State.m_si);
             break;
         }
         case 0x47: /* INC eDI */ {
-            m_State.m_di = alu::Inc16(m_State.m_flags, m_State.m_di);
+            m_State.m_di = alu::INC<16>(m_State.m_flags, m_State.m_di);
             break;
         }
         case 0x48: /* DEC eAX */ {
-            m_State.m_ax = alu::Dec16(m_State.m_flags, m_State.m_ax);
+            m_State.m_ax = alu::DEC<16>(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x49: /* DEC eCX */ {
-            m_State.m_cx = alu::Dec16(m_State.m_flags, m_State.m_cx);
+            m_State.m_cx = alu::DEC<16>(m_State.m_flags, m_State.m_cx);
             break;
         }
         case 0x4a: /* DEC eDX */ {
-            m_State.m_dx = alu::Dec16(m_State.m_flags, m_State.m_dx);
+            m_State.m_dx = alu::DEC<16>(m_State.m_flags, m_State.m_dx);
             break;
         }
         case 0x4b: /* DEC eBX */ {
-            m_State.m_bx = alu::Dec16(m_State.m_flags, m_State.m_bx);
+            m_State.m_bx = alu::DEC<16>(m_State.m_flags, m_State.m_bx);
             break;
         }
         case 0x4c: /* DEC eSP */ {
-            m_State.m_sp = alu::Dec16(m_State.m_flags, m_State.m_sp);
+            m_State.m_sp = alu::DEC<16>(m_State.m_flags, m_State.m_sp);
             break;
         }
         case 0x4d: /* DEC eBP */ {
-            m_State.m_bp = alu::Dec16(m_State.m_flags, m_State.m_bp);
+            m_State.m_bp = alu::DEC<16>(m_State.m_flags, m_State.m_bp);
             break;
         }
         case 0x4e: /* DEC eSI */ {
-            m_State.m_si = alu::Dec16(m_State.m_flags, m_State.m_si);
+            m_State.m_si = alu::DEC<16>(m_State.m_flags, m_State.m_si);
             break;
         }
         case 0x4f: /* DEC eDI */ {
-            m_State.m_di = alu::Dec16(m_State.m_flags, m_State.m_di);
+            m_State.m_di = alu::DEC<16>(m_State.m_flags, m_State.m_di);
             break;
         }
         case 0x50: /* PUSH eAX */ {
@@ -712,28 +712,28 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA8(m_DecodeState, alu::Add8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::ADD<8>(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA8(m_DecodeState, alu::Or8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::OR<8>(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA8(m_DecodeState, alu::Adc8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::ADC<8>(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA8(m_DecodeState, alu::Sbb8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::SBB<8>(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA8(m_DecodeState, alu::And8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::AND<8>(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA8(m_DecodeState, alu::Sub8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::SUB<8>(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA8(m_DecodeState, alu::Xor8(m_State.m_flags, val, imm));
+                    WriteEA8(m_DecodeState, alu::XOR<8>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, val, imm);
+                    [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -747,28 +747,28 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, alu::Add16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::ADD<16>(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, alu::Or16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::OR<16>(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, alu::Adc16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::ADC<16>(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, alu::Sbb16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::SBB<16>(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, alu::And16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::AND<16>(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, alu::Sub16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::SUB<16>(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, alu::Xor16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, val, imm);
+                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -782,28 +782,28 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, alu::Add16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::ADD<16>(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, alu::Or16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::OR<16>(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, alu::Adc16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::ADC<16>(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, alu::Sbb16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::SBB<16>(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, alu::And16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::AND<16>(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, alu::Sub16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::SUB<16>(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, alu::Xor16(m_State.m_flags, val, imm));
+                    WriteEA16(m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, val, imm);
+                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -813,13 +813,13 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _ = alu::And8(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            [[maybe_unused]] auto _ = alu::AND<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x85: /* TEST Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _ = alu::And16(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            [[maybe_unused]] auto _ = alu::AND<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x86: /* XCHG Gb Eb */ {
@@ -1026,7 +1026,7 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags,
+                    [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags,
                         m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
@@ -1036,7 +1036,7 @@ void CPUx86::RunInstruction()
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags,
+                [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -1051,7 +1051,7 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags,
+                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags,
                         m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
@@ -1061,7 +1061,7 @@ void CPUx86::RunInstruction()
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags,
+                [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -1071,12 +1071,12 @@ void CPUx86::RunInstruction()
         }
         case 0xa8: /* TEST AL Ib */ {
             const auto imm = getImm8();
-            [[maybe_unused]] auto _ = alu::And8(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            [[maybe_unused]] auto _ = alu::AND<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0xa9: /* TEST eAX Iv */ {
             const auto imm = getImm16();
-            [[maybe_unused]] auto _ = alu::And16(m_State.m_flags, m_State.m_ax, imm);
+            [[maybe_unused]] auto _ = alu::AND<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0xaa: /* STOSB */ {
@@ -1136,14 +1136,14 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                    [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::Sub8(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
@@ -1154,14 +1154,14 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::Sub16(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
@@ -1634,7 +1634,7 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Ib */ {
                     const auto imm = getImm8();
-                    [[maybe_unused]] auto _ = alu::And8(m_State.m_flags, ReadEA8(m_DecodeState), imm);
+                    [[maybe_unused]] auto _ = alu::AND<8>(m_State.m_flags, ReadEA8(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
@@ -1644,7 +1644,7 @@ void CPUx86::RunInstruction()
                     WriteEA8(m_DecodeState, 0xFF - ReadEA8(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA8(m_DecodeState, alu::Sub8(m_State.m_flags, 0, ReadEA8(m_DecodeState)));
+                    WriteEA8(m_DecodeState, alu::SUB<8>(m_State.m_flags, 0, ReadEA8(m_DecodeState)));
                     break;
                 case 4: /* MUL */
                     alu::Mul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
@@ -1671,7 +1671,7 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Iw */ {
                     const auto imm = getImm16();
-                    [[maybe_unused]] auto _ = alu::And16(m_State.m_flags, ReadEA16(m_DecodeState), imm);
+                    [[maybe_unused]] auto _ = alu::AND<16>(m_State.m_flags, ReadEA16(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
@@ -1681,7 +1681,7 @@ void CPUx86::RunInstruction()
                     WriteEA16(m_DecodeState, 0xFFFF - ReadEA16(m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA16(m_DecodeState, alu::Sub16(m_State.m_flags, 0, ReadEA16(m_DecodeState)));
+                    WriteEA16(m_DecodeState, alu::SUB<16>(m_State.m_flags, 0, ReadEA16(m_DecodeState)));
                     break;
                 case 4: /* MUL */
                     alu::Mul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
@@ -1732,10 +1732,10 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // inc
-                    WriteEA8(m_DecodeState, alu::Inc8(m_State.m_flags, val));
+                    WriteEA8(m_DecodeState, alu::INC<8>(m_State.m_flags, val));
                     break;
                 case 1: // dec
-                    WriteEA8(m_DecodeState, alu::Dec8(m_State.m_flags, val));
+                    WriteEA8(m_DecodeState, alu::DEC<8>(m_State.m_flags, val));
                     break;
                 default: // invalid
                     invalidOpcode();
@@ -1751,10 +1751,10 @@ void CPUx86::RunInstruction()
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: /* INC eV */
-                    WriteEA16(m_DecodeState, alu::Inc16(m_State.m_flags, val));
+                    WriteEA16(m_DecodeState, alu::INC<16>(m_State.m_flags, val));
                     break;
                 case 1: /* DEC eV */
-                    WriteEA16(m_DecodeState, alu::Dec16(m_State.m_flags, val));
+                    WriteEA16(m_DecodeState, alu::DEC<16>(m_State.m_flags, val));
                     break;
                 case 2: /* CALL Ev */
                     Push16(m_State.m_ip);

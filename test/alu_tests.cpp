@@ -275,16 +275,16 @@ namespace
 
         constexpr std::array all_tests{
             TestVector{"add8.bin", "add", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::Add8(flags, a, b);
+                return cpu::alu::ADD<8>(flags, a, b);
             } } },
             TestVector{"sub8.bin", "sub", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::Sub8(flags, a, b);
+                return cpu::alu::SUB<8>(flags, a, b);
             } } },
             TestVector{"adc8.bin", "adc", Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::Adc8(flags, a, b);
+                return cpu::alu::ADC<8>(flags, a, b);
             } } },
             TestVector{"sbb8.bin", "sbb", Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::Sbb8(flags, a, b);
+                return cpu::alu::SBB<8>(flags, a, b);
             } } },
             TestVector{"shl8_1.bin", "shl1", Test8{ [](auto& flags, auto a) -> uint8_t {
                 return cpu::alu::SHL<8>(flags, a, 1);
@@ -329,19 +329,19 @@ namespace
                 return cpu::alu::RCR<8>(flags, a, b);
             } } },
             TestVector{"or8.bin", "or8", Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
-                return cpu::alu::Or8(flags, a, b);
+                return cpu::alu::OR<8>(flags, a, b);
             } } },
             TestVector{"and8.bin", "and8", Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
-                return cpu::alu::And8(flags, a, b);
+                return cpu::alu::AND<8>(flags, a, b);
             } } },
             TestVector{"xor8.bin", "xor8", Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
-                return cpu::alu::Xor8(flags, a, b);
+                return cpu::alu::XOR<8>(flags, a, b);
             } } },
             TestVector{"inc8.bin", "inc", Test8WithCarry{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::Inc8(flags, a);
+                return cpu::alu::INC<8>(flags, a);
             } } },
             TestVector{"dec8.bin", "dec", Test8WithCarry{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::Dec8(flags, a);
+                return cpu::alu::DEC<8>(flags, a);
             } } },
     #if 0
             TestVector{"neg8.bin", "neg", Test8{ [](auto& flags, auto a) -> uint8_t {

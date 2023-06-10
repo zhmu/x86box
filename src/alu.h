@@ -273,16 +273,6 @@ namespace alu {
         return res & MaskOf<BITS>();
     }
 
-    [[nodiscard]] constexpr uint8_t Add8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        return ADD<8>(flags, a, b);
-    }
-
-    [[nodiscard]] constexpr uint16_t Add16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        return ADD<16>(flags, a, b);
-    }
-
     template<unsigned int BITS>
     [[nodiscard]] constexpr UintOf<BITS> OR(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
@@ -291,16 +281,6 @@ namespace alu {
             ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<8>(flags, op1);
         return op1;
-    }
-
-    [[nodiscard]] constexpr uint8_t Or8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        return OR<8>(flags, a, b);
-    }
-
-    [[nodiscard]] constexpr uint16_t Or16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        return OR<16>(flags, a, b);
     }
 
     template<unsigned int BITS>
@@ -313,16 +293,6 @@ namespace alu {
         return res;
     }
 
-    [[nodiscard]] constexpr uint8_t And8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        return AND<8>(flags, a, b);
-    }
-
-    [[nodiscard]] constexpr uint16_t And16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        return AND<16>(flags, a, b);
-    }
-
     template<unsigned int BITS>
     [[nodiscard]] constexpr UintOf<BITS> XOR(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
@@ -331,16 +301,6 @@ namespace alu {
             ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
         SetFlagsSZP<BITS>(flags, res);
         return res;
-    }
-
-    [[nodiscard]] constexpr uint8_t Xor8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        return XOR<8>(flags, a, b);
-    }
-
-    [[nodiscard]] constexpr uint16_t Xor16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        return XOR<16>(flags, a, b);
     }
 
     template<unsigned int BITS>
@@ -353,16 +313,6 @@ namespace alu {
         return res & MaskOf<BITS>();
     }
 
-    [[nodiscard]] constexpr uint8_t Adc8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        return ADC<8>(flags, a, b);
-    }
-
-    [[nodiscard]] constexpr uint16_t Adc16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        return ADC<16>(flags, a, b);
-    }
-
     template<unsigned int BITS>
     [[nodiscard]] constexpr UintOf<BITS> SUB(uint16_t& flags, UintOf<BITS> a, UintOf<BITS> b)
     {
@@ -370,16 +320,6 @@ namespace alu {
         cpu::SetFlag<cpu::flag::CF>(flags, res & CarryMaskOf<BITS>());
         SetFlagsForSub<BITS>(flags, a, b, 0, res);
         return res & MaskOf<BITS>();
-    }
-
-    [[nodiscard]] constexpr uint8_t Sub8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        return SUB<8>(flags, a, b);
-    }
-
-    [[nodiscard]] constexpr uint16_t Sub16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        return SUB<16>(flags, a, b);
     }
 
     template<unsigned int BITS>
@@ -392,16 +332,6 @@ namespace alu {
         return res & MaskOf<BITS>();
     }
 
-    [[nodiscard]] constexpr uint8_t Sbb8(uint16_t& flags, uint8_t a, uint8_t b)
-    {
-        return SBB<8>(flags, a, b);
-    }
-
-    [[nodiscard]] constexpr uint16_t Sbb16(uint16_t& flags, uint16_t a, uint16_t b)
-    {
-        return SBB<16>(flags, a, b);
-    }
-
     template<unsigned int BITS>
     [[nodiscard]] constexpr UintOf<BITS> INC(uint16_t& flags, UintOf<BITS> a)
     {
@@ -411,16 +341,6 @@ namespace alu {
         return res;
     }
 
-    [[nodiscard]] constexpr uint8_t Inc8(uint16_t& flags, uint8_t a)
-    {
-        return INC<8>(flags, a);
-    }
-
-    [[nodiscard]] constexpr uint16_t Inc16(uint16_t& flags, uint16_t a)
-    {
-        return INC<16>(flags, a);
-    }
-
     template<unsigned int BITS>
     [[nodiscard]] constexpr UintOf<BITS> DEC(uint16_t& flags, UintOf<BITS> a)
     {
@@ -428,16 +348,6 @@ namespace alu {
         const auto res = SUB<BITS>(flags, a, 1);
         cpu::SetFlag<cpu::flag::CF>(flags, carry);
         return res;
-    }
-
-    [[nodiscard]] constexpr uint8_t Dec8(uint16_t& flags, uint8_t a)
-    {
-        return DEC<8>(flags, a);
-    }
-
-    [[nodiscard]] constexpr uint16_t Dec16(uint16_t& flags, uint16_t a)
-    {
-        return DEC<16>(flags, a);
     }
 
     constexpr void Mul8(uint16_t& flags, uint16_t& ax, uint8_t a)
