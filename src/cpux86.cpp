@@ -8,8 +8,7 @@
 #include <utility>
 #include "alu.h"
 
-#define TRACE(x...) \
-    if (0) fprintf(stderr, "[cpu] " x)
+#include "spdlog/spdlog.h"
 
 CPUx86::CPUx86(Memory& oMemory, IO& oIO, Vectors& oVectors)
     : m_Memory(oMemory), m_IO(oIO), m_Vectors(oVectors)
@@ -61,30 +60,6 @@ namespace
         state.m_prefix &= ~cpu::State::PREFIX_SEG;
         return state.m_seg_override;
     }
-
-    namespace testing {
-        using VerifyAddTuple = std::tuple<uint8_t, uint8_t, cpu::Flags, uint8_t>;
-
-        constexpr bool VerifyAdd8(const VerifyAddTuple& t)
-        {
-            auto [ val1, val2, expected_flags, expected_result ] = t;
-            uint16_t flags = cpu::flag::ON;
-            auto result = alu::ADD<8>(flags, val1, val2);
-            return result == expected_result && flags == expected_flags;
-        }
-
-        constexpr bool VerifySub8(const VerifyAddTuple& t)
-        {
-            auto [ val1, val2, expected_flags, expected_result ] = t;
-            uint16_t flags = cpu::flag::ON;
-            auto result = alu::SUB<8>(flags, val1, val2);
-            return result == expected_result && flags == expected_flags;
-        }
-
-        //#include "test_add8.inc"
-        //#include "test_sub8.inc"
-    }
-
 }
 
 void CPUx86::RunInstruction()
@@ -103,8 +78,8 @@ void CPUx86::RunInstruction()
             RelativeJump8(m_State.m_ip, imm);
     };
 
-    auto todo = []() { TRACE("TODO\n"); };
-    auto invalidOpcode = []() { TRACE("invalidOpcode()\n"); std::abort(); };
+    auto todo = []() { spdlog::warn("TODO"); };
+    auto invalidOpcode = []() { spdlog::error("invalidOpcode()\n"); std::abort(); };
 
     /*
      * The Op_... macro's follow the 80386 manual conventions (appendix F page
@@ -155,7 +130,7 @@ void CPUx86::RunInstruction()
     };
 
     const auto opcode = GetNextOpcode();
-    TRACE("cs:ip=%04x:%04x opcode 0x%02x\n", m_State.m_cs, m_State.m_ip - 1, opcode);
+    spdlog::debug("cs:ip={:04x}:{:04x} opcode {:02x}", m_State.m_cs, m_State.m_ip - 1, opcode);
     switch (opcode) {
         case 0x00: /* ADD Eb Gb */ {
             opEbGb(cpu::alu::ADD<8>);
@@ -1795,10 +1770,10 @@ void CPUx86::RunInstruction()
 void CPUx86::Handle0FPrefix()
 {
     auto getImm8 = [&]() { return GetNextOpcode(); };
-    auto invalidOpcode = []() { TRACE("invalidOpcode 0F..\n"); std::abort(); };
+    auto invalidOpcode = []() { spdlog::error("invalidOpcode()\n"); std::abort(); };
 
     uint8_t opcode = GetNextOpcode();
-    TRACE("cs:ip=%04x:%04x opcode 0x0f 0x%02x\n", m_State.m_cs, m_State.m_ip - 1, opcode);
+    spdlog::debug("cs:ip={:04x}:{:04x} opcode 0f {:02x}", m_State.m_cs, m_State.m_ip - 1, opcode);
     switch (opcode) {
         case 0x34: /* SYSENTER - (ab)used for interrupt dispatch */ {
             const auto imm = getImm8();
@@ -1939,8 +1914,8 @@ uint16_t CPUx86::ReadEA16(const DecodeState& oState)
             std::abort();
     }
 
-    TRACE(
-        "read(16) @ %x:%x -> %x\n", seg_base, oState.m_off + oState.m_disp,
+    spdlog::info("read(16) @ {:04x}:{:04x} -> {:x}",
+        seg_base, oState.m_off + oState.m_disp,
         m_Memory.ReadWord(MakeAddr(seg_base, oState.m_off + oState.m_disp)));
     return m_Memory.ReadWord(MakeAddr(seg_base, oState.m_off + oState.m_disp));
 }
@@ -1970,7 +1945,7 @@ void CPUx86::WriteEA16(const DecodeState& oState, uint16_t value)
             std::abort();
     }
 
-    TRACE("write(16) @ %x:%x val %x\n", seg_base, oState.m_off + oState.m_disp, value);
+    spdlog::info("write(16) @ {:04x}:{:04x} value {:x}", seg_base, oState.m_off + oState.m_disp, value);
     m_Memory.WriteWord(MakeAddr(seg_base, oState.m_off + oState.m_disp), value);
 }
 
@@ -2000,7 +1975,7 @@ uint8_t CPUx86::ReadEA8(const DecodeState& oState)
             std::abort();
     }
 
-    TRACE("read(8) @ %x:%x\n", seg_base, oState.m_off + oState.m_disp);
+    spdlog::info("read(8) @ {:04x}:{:04x}", seg_base, oState.m_off + oState.m_disp);
     return m_Memory.ReadByte(MakeAddr(seg_base, oState.m_off + oState.m_disp));
 }
 
@@ -2031,7 +2006,7 @@ void CPUx86::WriteEA8(const DecodeState& oState, uint8_t val)
             std::abort();
     }
 
-    TRACE("write(8) @ %x:%x val %\n", seg_base, oState.m_off + oState.m_disp, val);
+    spdlog::info("write(8) @ {:04x}:{:04x} value {:x}", seg_base, oState.m_off + oState.m_disp, val);
     m_Memory.WriteByte(MakeAddr(seg_base, oState.m_off + oState.m_disp), val);
 }
 
@@ -2116,11 +2091,9 @@ namespace cpu
 
 void Dump(const State& st)
 {
-    fprintf(
-        stderr, "  ax=%04x bx=%04x cx=%04x dx=%04x si=%04x di=%04x bp=%04x flags=%04x\n", st.m_ax,
+    spdlog::debug( "  ax={:04x} bx={:04x} cx={:04x} dx={:04x} si={:04x} di={:04x} bp={:04x} flags={:04x}", st.m_ax,
         st.m_bx, st.m_cx, st.m_dx, st.m_si, st.m_di, st.m_bp, st.m_flags);
-    fprintf(
-        stderr, "  cs:ip=%04x:%04x ds=%04x es=%04x ss:sp=%04x:%04x\n", st.m_cs, st.m_ip, st.m_ds, st.m_es, st.m_ss,
+    spdlog::debug("  cs:ip={:04x}:{:04x} ds={:04x} es={:04x} ss:sp={:04x}:{:04x}", st.m_cs, st.m_ip, st.m_ds, st.m_es, st.m_ss,
         st.m_sp);
 }
 
@@ -2130,7 +2103,7 @@ void CPUx86::Dump() { cpu::Dump(m_State); }
 
 void CPUx86::SignalInterrupt(uint8_t no)
 {
-    TRACE("SignalInterrupt 0x%x\n", no);
+    spdlog::error("SignalInterrupt(): no {:x}", no);
     std::abort(); // TODO
 }
 
@@ -2148,7 +2121,7 @@ void CPUx86::HandleInterrupt(uint8_t no)
     m_State.m_cs = m_Memory.ReadWord(addr + 2);
     m_State.m_ip = m_Memory.ReadWord(addr + 0);
 
-    TRACE("HandleInterrupt(): no=%x -> %04x:%04x\n", no, m_State.m_cs, m_State.m_ip);
+    spdlog::warn("SignalInterrupt(): no -> {:04x}:{:04x}", no, m_State.m_cs, m_State.m_ip);
 
     // XXX Kludge
     if (m_State.m_cs == 0 && m_State.m_ip == 0)
@@ -2175,7 +2148,7 @@ void CPUx86::HandleInterrupt(uint8_t no)
 				cpu::SetFlag<cpu::flag::ZF>(m_State.m_flags, true);
 				break;
 			default:
-				TRACE("HandleInterrupt %d func %d\n", no, ah);
+				spdlog::error("HandleInterrupt {} func {}", no, ah);
 		}
 		return;
 	}

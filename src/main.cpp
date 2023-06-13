@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "spdlog/cfg/env.h"
+
 Memory memory;
 IO io;
 Vectors vectors(memory);
@@ -40,6 +42,8 @@ static bool load_to_memory(const char* fname, uint32_t base)
 
 int main(int argc, char** argv)
 {
+    spdlog::cfg::load_env_levels();
+
     memory.Reset();
     memory.AddPeripheral(0xa0000, 65535, vga);
     memory.AddPeripheral(0xb0000, 65535, vga);

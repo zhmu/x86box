@@ -5,12 +5,7 @@
 #include "hostio.h"
 #include "vectors.h"
 
-#define TRACE_INT(x...) \
-    if (1)              \
-    fprintf(stderr, "[kbd-int] " x)
-#define TRACE(x...) \
-    if (1)          \
-    fprintf(stderr, "[kbd] " x)
+#include "spdlog/spdlog.h"
 
 Keyboard::Keyboard(Memory& memory, HostIO& hostio, Vectors& vectors)
     : m_memory(memory), m_hostio(hostio), m_vectors(vectors)
@@ -37,12 +32,12 @@ void Keyboard::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
     const uint8_t ah = (oState.m_ax & 0xff00) >> 8;
     switch (ah) {
         case 0x01: {
-            TRACE_INT("ah=%02x: check for key\n", ah);
+            spdlog::info("kbd: ah={:x}: check for key", ah);
             oState.m_flags |= cpu::flag::ZF;
             break;
         }
         default: /* what's this? */
-            TRACE_INT("unknown function ah=%02x\n", ah);
+            spdlog::info("unknown function ah={:x}", ah);
             break;
     }
 }

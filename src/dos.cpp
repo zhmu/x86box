@@ -8,8 +8,7 @@
 #include "memory.h"
 #include "vectors.h"
 
-#define TRACE_INT(x...) fprintf(stderr, "[dos-int] " x)
-#define TRACE_EXE(x...) fprintf(stderr, "[dos-exe] " x)
+#include "spdlog/spdlog.h"
 
 namespace
 {
@@ -126,15 +125,14 @@ DOS::ErrorCode DOS::LoadEXE(std::ifstream& ifs)
         reinterpret_cast<ProgramSegmentPrefix*>(m_Memory.GetPointer(CPUx86::MakeAddr(seg, 0), sizeof(*oPSP)));
     CreatePSP(*oPSP);
 
-    TRACE_EXE(
-        "exe_size=%u seg=0x%04x exe_seg=%04x bss_seg=%04x\n", exe_size, seg, exe_seg, bss_seg);
-    TRACE_EXE(
-        "cs:ip=%04x:%04x ss:sp=%04x:%04x\n", header.eh_cs, header.eh_ip, header.eh_ss,
+    spdlog::info("exe_size={} seg={:04x} exe_seg={:04x} bss_seg={:04x}", exe_size, seg, exe_seg, bss_seg);
+    spdlog::info(
+        "cs:ip={:04x}:{:04x} ss:sp={:04x}:{:04x}", header.eh_cs, header.eh_ip, header.eh_ss,
         header.eh_sp);
 
     // Program data starts after the header; read it completely
-    TRACE_EXE(
-        "loading %u bytes from offset 0x%x -> %04x:0000 (%x)\n", exe_size,
+    spdlog::info(
+        "loading {} bytes from offset {:04x} -> {:04x}:0000 ({:x})", exe_size,
         header.eh_header_paragraphs * 16, exe_seg, CPUx86::MakeAddr(exe_seg, 0));
     ifs.seekg(header.eh_header_paragraphs * 16);
     for (unsigned int n = 0; n < exe_size; n++) {
@@ -201,11 +199,11 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
     switch (ah) {
         case 0x06: /* direct console output */ {
             GET_DL;
-            TRACE_INT("ah=%02x: direct console output, dl='%c'\n", ah, dl);
+            spdlog::info("dos: ah={:02x}: direct console output, dl='{}'", ah, dl);
             break;
         }
         case 0x2c: /* get system time */ {
-            TRACE_INT("ah=%02x: get system time\n", ah);
+            spdlog::info("dos: ah={:02x}: get system time", ah);
             time_t t = time(NULL);
             struct tm* tm = localtime(&t);
             CX = (tm->tm_hour << 8) | tm->tm_min;
@@ -214,7 +212,7 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
         }
         case 0x25: /* set interrupt vector */ {
             GET_AL;
-            TRACE_INT("ah=%02x: set interrupt vector, al=%02x ds:dx=%04x:%04x\n", ah, al, DS, DX);
+            spdlog::info("dos: ah={:02x}: set interrupt vector, al={:02x} ds:dx={:04x}:{:04x}", ah, al, DS, DX);
             CPUx86::addr_t addr = CPUx86::MakeAddr(0, al * 4);
             oMemory.WriteWord(addr + 2, DS);
             oMemory.WriteWord(addr + 0, DX);
@@ -222,7 +220,7 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
         }
         case 0x35: /* get interrupt vector */ {
             GET_AL;
-            TRACE_INT("ah=%02x: get interrupt vector al=%02x\n", ah, al);
+            spdlog::info("dos: ah={:02x}: get interrupt vector al={:02x}", ah, al);
             CPUx86::addr_t addr = CPUx86::MakeAddr(0, al * 4);
             ES = oMemory.ReadWord(addr + 2);
             BX = oMemory.ReadWord(addr + 0);
@@ -230,8 +228,8 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
         }
         case 0x3c: /* create/truncate file */ {
             const auto sFilename = oMemory.GetASCIIZString(CPUx86::MakeAddr(DS, DX));
-            TRACE_INT(
-                "ah=%02x: create/truncate file, cx=%04x ds:dx=%04x:%04x '%s'\n", ah, CX, DS, DX,
+            spdlog::info(
+                "dos: ah={:02x}: create/truncate file, cx={:04x} ds:dx={:04x}:{:04x} '{}'", ah, CX, DS, DX,
                 sFilename.c_str());
             // SetError(ErrorCode::FileNotFound);
             AX = 42;
@@ -239,12 +237,12 @@ void DOS::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
         }
         case 0x4c: /* terminate with return code */ {
             GET_AL;
-            TRACE_INT("ah=%02x: terminate with return code, ah=%02x\n", ah, al);
+            spdlog::info("dos: ah={:02x}: terminate with return code, ah={:02x}", ah, al);
             exit(al);
             break;
         }
         default: /* what's this? */
-            TRACE_INT("unknown function ah=%02x\n", ah);
+            spdlog::info("dos: unknown function ah={:02x}", ah);
             SetError(ErrorCode::InvalidFunction);
             break;
     }
