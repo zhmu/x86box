@@ -368,6 +368,13 @@ namespace alu {
         [[maybe_unused]] const auto _ = SUB<BITS>(flags, a, b);
     }
 
+    template<unsigned int BITS>
+    void TEST(cpu::Flags& flags, UintOf<BITS> a, UintOf<BITS> b)
+    {
+        // TEST only cares about the flag bits
+        [[maybe_unused]] const auto _ = AND<BITS>(flags, a, b);
+    }
+
     constexpr void Mul8(cpu::Flags& flags, uint16_t& ax, uint8_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);

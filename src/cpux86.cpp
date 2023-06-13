@@ -711,7 +711,7 @@ void CPUx86::RunInstruction()
                     WriteEA8(m_DecodeState, alu::XOR<8>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, val, imm);
+                    alu::CMP<8>(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -746,7 +746,7 @@ void CPUx86::RunInstruction()
                     WriteEA16(m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, val, imm);
+                    alu::CMP<16>(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -781,7 +781,7 @@ void CPUx86::RunInstruction()
                     WriteEA16(m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
-                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, val, imm);
+                    alu::CMP<16>(m_State.m_flags, val, imm);
                     break;
             }
             break;
@@ -791,13 +791,13 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
             uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            [[maybe_unused]] auto _ = alu::AND<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            alu::TEST<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
             break;
         }
         case 0x85: /* TEST Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            [[maybe_unused]] auto _ = alu::AND<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            alu::TEST<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
             break;
         }
         case 0x86: /* XCHG Gb Eb */ {
@@ -1004,7 +1004,7 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags,
+                    alu::CMP<8>(m_State.m_flags,
                         m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
@@ -1014,7 +1014,7 @@ void CPUx86::RunInstruction()
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags,
+                alu::CMP<8>(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -1029,7 +1029,7 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags,
+                    alu::CMP<16>(m_State.m_flags,
                         m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si)),
                         m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
@@ -1039,7 +1039,7 @@ void CPUx86::RunInstruction()
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags,
+                alu::CMP<16>(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
@@ -1049,12 +1049,12 @@ void CPUx86::RunInstruction()
         }
         case 0xa8: /* TEST AL Ib */ {
             const auto imm = getImm8();
-            [[maybe_unused]] auto _ = alu::AND<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            alu::TEST<8>(m_State.m_flags, m_State.m_ax & 0xff, imm);
             break;
         }
         case 0xa9: /* TEST eAX Iv */ {
             const auto imm = getImm16();
-            [[maybe_unused]] auto _ = alu::AND<16>(m_State.m_flags, m_State.m_ax, imm);
+            alu::TEST<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0xaa: /* STOSB */ {
@@ -1114,14 +1114,14 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                    alu::CMP<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::SUB<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
+                alu::CMP<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
@@ -1132,14 +1132,14 @@ void CPUx86::RunInstruction()
                 bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
-                    [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                    alu::CMP<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_di += delta;
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
-                [[maybe_unused]] auto _ = alu::SUB<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
+                alu::CMP<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
             }
             break;
@@ -1612,7 +1612,7 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Ib */ {
                     const auto imm = getImm8();
-                    [[maybe_unused]] auto _ = alu::AND<8>(m_State.m_flags, ReadEA8(m_DecodeState), imm);
+                    alu::TEST<8>(m_State.m_flags, ReadEA8(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
@@ -1649,7 +1649,7 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Iw */ {
                     const auto imm = getImm16();
-                    [[maybe_unused]] auto _ = alu::AND<16>(m_State.m_flags, ReadEA16(m_DecodeState), imm);
+                    alu::TEST<16>(m_State.m_flags, ReadEA16(m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
