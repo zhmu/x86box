@@ -40,6 +40,18 @@ def load_tests_16(fname):
         tests.append((exp_val, exp_flags))
     return tests
 
+def load_tests_intn_16(fname):
+    with open(fname, 'rb') as f:
+        t = f.read()
+
+    tests = []
+    while t:
+        b = t[0:5]
+        t = t[5:]
+        exp_val, exp_flags, exp_intn = struct.unpack('<HHB', b)
+        tests.append((exp_val, exp_flags, exp_intn))
+    return tests
+
 CF = (1 << 0)
 ON = (1 << 1)
 PF = (1 << 2)
@@ -397,6 +409,28 @@ def my_aas(a, fl):
     a = (a & 0xff0f)
     return (a, new_fl)
 
+def my_aam(a, b, fl):
+    new_fl = fl
+
+    intn = 0xff
+    if b == 0:
+        intn = 0
+        return (a, new_fl, intn)
+
+    res = ((int(a / b) & 0xff) << 8) | (int(a % b) & 0xff)
+    new_fl = set_flags_pzs(res & 0xff, new_fl)
+    return (res, new_fl, intn)
+
+def my_aad(a, b, fl):
+    new_fl = fl
+
+    al = a & 0xff
+    ah = (a >> 8) & 0xff
+
+    res = (al + (ah * b)) & 0xff
+    new_fl = set_flags_pzs(res, new_fl)
+    return (res, new_fl)
+
 def verify_op8x8(tests, op_text, op_fn, initial_flags):
     assert len(tests) == 256 * 256
     print('Testing %s (8x8 bit input, initial flags: %s)' % (op_text, decode_flags(initial_flags)))
@@ -410,11 +444,7 @@ def verify_op8x8(tests, op_text, op_fn, initial_flags):
                 print('*** RESULT MISMATCH: got %x expected %x' % (res, t_res))
                 ok = False
             if t_fl != fl:
-                print('*** FLAGS MISMATCH: initial flags %s (%x)' % (decode_flags(initial_flags), initial_flags))
-                #my_of = 1 if fl & OF else 0
-                #exp_of = 1 if t_fl & OF else 0
-                #print("  my_of %d exp_of %d" % (my_of, exp_of))
-                #print('FL: %s %s --> %s %s' % (format_bin(a), b, format_bin(t_res), 'OF' if exp_of else '--'))
+                print('*** FLAGS MISMATCH: got %s (%x) expected %s (%x)' % (decode_flags(fl), fl, decode_flags(t_fl), t_fl))
                 ok = False
 
             if not ok:
@@ -479,6 +509,37 @@ def verify_op16(tests, op_text, op_fn, initial_flags):
             print('          %s' % (format_bin(t_res)))
             print()
             return False
+    return True
+
+def verify_opintn_16(tests, op_text, op_fn, initial_flags):
+    assert len(tests) == 65536
+    print('Testing %s (8x8 bit input, potential interrupt, initial flags: %s)' % (op_text, decode_flags(initial_flags)))
+    for a in range(0, 256):
+        for b in range(0, 256):
+            (t_res, t_fl, t_intn) = tests[256 * a + b]
+            (res, fl, intn) = op_fn(a, b, initial_flags)
+
+            ok = True
+            if t_res != res:
+                print('*** RESULT MISMATCH: got %x expected %x' % (res, t_res))
+                ok = False
+            if t_fl != fl:
+                print('*** FLAGS MISMATCH: got %s (%x) expected %s (%x)' % (decode_flags(fl), fl, decode_flags(t_fl), t_fl))
+                ok = False
+            if t_intn != intn:
+                print('*** INTERRUPT MISMATCH: got %x expected %x' % (intn, t_intn))
+                ok = False
+
+            if not ok:
+                print('>: %02x %s %02x = %02x   flags %04x %s' % (a, op_text, b, res, fl, decode_flags(fl)))
+                print('e: %02x %s %02x = %02x   flags %04x %s' % (a, op_text, b, t_res, t_fl, decode_flags(t_fl)))
+
+                print('          %s' % (format_bin(a)))
+                print(' %8s %s' % (op_text, format_bin(b)))
+                print('====================')
+                print('          %s' % (format_bin(t_res)))
+                print()
+                return False
     return True
 
 add_tests = load_tests_8x8("add8.bin")
@@ -621,6 +682,13 @@ aas_tests = load_tests_16("aas.bin")
 if not verify_op16(aas_tests[:65536], "aas", my_aas, ON):
     quit()
 if not verify_op16(aas_tests[65536:], "aas", my_aas, ON | AF):
+    quit()
+
+aam_tests = load_tests_intn_16("aam.bin")
+if not verify_opintn_16(aam_tests, "aam", my_aam, ON):
+    quit()
+aad_tests = load_tests_16("aad.bin")
+if not verify_op8x8(aad_tests, "aad", my_aad, ON):
     quit()
 
 # TODO: need to think about how to test these...

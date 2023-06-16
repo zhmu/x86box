@@ -27,25 +27,34 @@ section .text
     mov     [handle],ax
 
 next2:
-    mov     di,result
 next:
+    mov     di,result
+
     ; set flags
     mov     ax,2h
-    cmp     byte [cf],0
+    test    byte [flags],1
     jz      cf_off
     or      ax,1            ; CF
 cf_off:
+    test    byte [flags],2
+    jz      af_off
+    or      ax,(1<<4)            ; AF
+af_off:
     push    ax
     popf
 
     ; set up registers
     mov     al,0ffh
     mov     [intn],al
-    mov     ax,[val1w]
+    mov     al,[val1]
     mov     bl,[val2]
+    mov     byte [arg],bl
+    jmp     $+2
 
     ; do operation
-    aas
+    db      0d5h
+arg:
+    db      0
 
     ; store results (al / flags / error)
     stosw
@@ -62,15 +71,18 @@ cf_off:
     sub     cx,dx
     int     21h
 
-    ;inc     byte [val2]
-    ;jnz     next
+    inc     byte [val2]
+    jnz     next
 
-    inc     word [val1w]
+    inc     byte [val1]
     jnz     next2
 
-    inc     byte [cf]
-    cmp     byte [cf],1
-    jne     next2
+    ;inc      word [val1w]
+    ;jnz      next2
+
+   ; inc     byte [flags]
+    ;cmp     byte [flags],1
+    ;jne     next2
 
     ; close file
     mov     ah,3eh
@@ -110,7 +122,7 @@ write_buffer:
 division_error:
     push    bp
     mov     bp,sp
-    add     word ss:[bp+2],2 ; skip div
+    add     word ss:[bp+2],2 ; skip instruction
     mov     byte cs:[intn],00h
 
     push    ax
@@ -128,7 +140,7 @@ val2w       dw  0
 handle      dw  0
 prev_flags  dw  0
 old_de      dd  0
-cf          db  0
+flags       db  0
 
 fname       db  "out.bin",0
 errormsg    db  "error$"
