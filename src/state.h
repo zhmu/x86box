@@ -18,7 +18,6 @@ namespace cpu
         static constexpr inline Flags IF = (1 << 9);
         static constexpr inline Flags DF = (1 << 10);
         static constexpr inline Flags OF = (1 << 11);
-
     }
 
     //! \brief CPU state
@@ -51,6 +50,7 @@ namespace cpu
     [[nodiscard]] constexpr bool IsFlagSet(Flags flags) { return (flags & Flag) != 0; };
 
     [[nodiscard]] constexpr bool FlagCarry(Flags flags) { return IsFlagSet<flag::CF>(flags); }
+    [[nodiscard]] constexpr bool FlagAuxiliaryCarry(Flags flags) { return IsFlagSet<flag::AF>(flags); }
     [[nodiscard]] constexpr bool FlagZero(Flags flags) { return IsFlagSet<flag::ZF>(flags); }
     [[nodiscard]] constexpr bool FlagParity(Flags flags) { return IsFlagSet<flag::PF>(flags); }
     [[nodiscard]] constexpr bool FlagSign(Flags flags) { return IsFlagSet<flag::SF>(flags); }

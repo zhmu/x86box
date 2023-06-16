@@ -1,6 +1,7 @@
 #pragma once
 
 #include <numeric> // popcount()
+#include <optional>
 #include "state.h"
 
 namespace cpu {
@@ -451,6 +452,26 @@ namespace alu {
             cpu::SetFlag<cpu::flag::AF>(flags, false);
         }
         return res & 0xff0f;
+    }
+
+    [[nodiscard]] constexpr std::optional<uint16_t> AAM(cpu::Flags& flags, uint8_t v, uint8_t imm)
+    {
+        if (imm == 0)
+            return {};
+
+        uint16_t result = ((static_cast<uint16_t>(v / imm) & 0xff) << 8) | ((v % imm) & 0xff);
+        SetFlagsSZP<8>(flags, result & 0xff);
+        return result;
+    }
+
+    [[nodiscard]] uint16_t AAD(cpu::Flags& flags, uint16_t v, uint8_t imm)
+    {
+        const auto al = v & 0xff;
+        const auto ah = (v >> 8) & 0xff;
+
+        const uint16_t result = (al + (ah * imm)) & 0xff;
+        SetFlagsSZP<8>(flags, result & 0xff);
+        return result;
     }
 
     constexpr void Mul8(cpu::Flags& flags, uint16_t& ax, uint8_t a)
