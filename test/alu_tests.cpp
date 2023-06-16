@@ -7,21 +7,20 @@
 #include <tuple>
 #include <variant>
 #include <algorithm>
+#include <optional>
 #include <unistd.h>
 
 using namespace std::literals::string_literals;
 
 namespace
 {
-    struct TestInput8 {
-        uint8_t result;
+    template<typename T>
+    struct TestInput {
+        T result;
         cpu::Flags flags;
     };
-
-    struct TestInput16 {
-        uint16_t result;
-        cpu::Flags flags;
-    };
+    using TestInput8 = TestInput<uint8_t>;
+    using TestInput16 = TestInput<uint16_t>;
 
     template<typename T>
     bool TryRead(std::ifstream& ifs, T& result)
@@ -53,29 +52,22 @@ namespace
         return s;
     }
 
-    std::vector<TestInput8> ReadTestData8(std::ifstream& ifs, unsigned int amount)
+    template<typename T>
+    std::vector<T> ReadTestData(std::ifstream& ifs, unsigned int amount)
     {
-        std::vector<TestInput8> result;
+        std::vector<T> result;
         for (unsigned int n = 0; n < amount; ++n) {
-            TestInput8 ti;
+            T ti;
             if (!TryRead(ifs, ti.result) || !TryRead(ifs, ti.flags))
                 throw std::runtime_error("read error");
             result.push_back(ti);
         }
+        if (result.size() != amount)
+            throw std::runtime_error("insufficient number of tests encountered");
         return result;
     }
-
-    std::vector<TestInput16> ReadTestData16(std::ifstream& ifs, unsigned int amount)
-    {
-        std::vector<TestInput16> result;
-        for (unsigned int n = 0; n < amount; ++n) {
-            TestInput16 ti;
-            if (!TryRead(ifs, ti.result) || !TryRead(ifs, ti.flags))
-                throw std::runtime_error("read error");
-            result.push_back(ti);
-        }
-        return result;
-    }
+    auto ReadTestData8(std::ifstream& ifs, unsigned int amount) { return ReadTestData<TestInput8>(ifs, amount); }
+    auto ReadTestData16(std::ifstream& ifs, unsigned int amount) { return ReadTestData<TestInput16>(ifs, amount); }
 
     std::vector<TestInput8> LoadTests8x8(const std::string& path)
     {
@@ -83,8 +75,6 @@ namespace
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
         auto result = ReadTestData8(ifs, 256 * 256);
-        if (result.size() != 65536)
-            throw std::runtime_error("invalid number of tests in '"s + path + "'");
         return result;
     }
 
@@ -94,12 +84,7 @@ namespace
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
         auto result_without_carry = ReadTestData8(ifs, 256 * 256);
-        if (result_without_carry.size() != 65536)
-            throw std::runtime_error("invalid number of tests without carry in '"s + path + "'");
         auto result_with_carry = ReadTestData8(ifs, 256 * 256);
-        if (result_with_carry.size() != 65536)
-            throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
-
         return { result_without_carry, result_with_carry };
     }
 
@@ -109,8 +94,6 @@ namespace
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
         auto result = ReadTestData8(ifs, 256);
-        if (result.size() != 256)
-            throw std::runtime_error("invalid number of tests in '"s + path + "'");
         return result;
     }
 
@@ -120,12 +103,7 @@ namespace
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
         auto result_without_carry = ReadTestData8(ifs, 256);
-        if (result_without_carry.size() != 256)
-            throw std::runtime_error("invalid number of tests without carry in '"s + path + "'");
         auto result_with_carry = ReadTestData8(ifs, 256);
-        if (result_with_carry.size() != 256)
-            throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
-
         return { result_without_carry, result_with_carry };
     }
 
@@ -135,18 +113,9 @@ namespace
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
         auto result_0 = ReadTestData8(ifs, 256);
-        if (result_0.size() != 256)
-            throw std::runtime_error("invalid number of tests in '"s + path + "'");
         auto result_cf = ReadTestData8(ifs, 256);
-        if (result_cf.size() != 256)
-            throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
         auto result_af = ReadTestData8(ifs, 256);
-        if (result_cf.size() != 256)
-            throw std::runtime_error("invalid number of tests with aux carry in '"s + path + "'");
         auto result_cf_af = ReadTestData8(ifs, 256);
-        if (result_cf_af.size() != 256)
-            throw std::runtime_error("invalid number of tests with carry+aux caerry in '"s + path + "'");
-
         return { result_0, result_cf, result_af, result_cf_af };
     }
 
@@ -156,13 +125,71 @@ namespace
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
         auto result_without_carry = ReadTestData16(ifs, 65536);
-        if (result_without_carry.size() != 65536)
-            throw std::runtime_error("invalid number of tests without carry in '"s + path + "'");
         auto result_with_carry = ReadTestData16(ifs, 65536);
-        if (result_with_carry.size() != 65536)
-            throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
-
         return { result_without_carry, result_with_carry };
+    }
+
+    int ProcessTestResult(std::string_view op_text, uint32_t a, std::optional<uint32_t> b, cpu::Flags initial_flags, uint32_t result, cpu::Flags flags, uint32_t expected_result, cpu::Flags expected_flags)
+    {
+        if (expected_result == result && expected_flags == flags)
+            return 0;
+
+        std::cout << std::hex;
+        std::cout
+            << "*** ERROR: " << static_cast<uint32_t>(a)
+            << " " << op_text;
+        if (b) {
+            std::cout << " " << static_cast<uint32_t>(*b);
+        };
+        std::cout
+            << " initial flags "
+            << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(initial_flags)
+            << " " << DecodeFlags(initial_flags)
+            << '\n';
+
+        if (expected_result != result)
+        {
+            std::cout
+                    << "  !! RESULT MISMATCH: "
+                    << " got " << static_cast<uint32_t>(result)
+                    << " expected " << static_cast<uint32_t>(expected_result)
+                    << "\n";
+        }
+
+        if (expected_flags != flags)
+        {
+            std::cout
+                    << "  !! FLAGS MISMATCH: "
+                    << " got " << static_cast<uint32_t>(flags)
+                    << " expected " << static_cast<uint32_t>(expected_flags)
+                    << "\n";
+        }
+
+        std::cout
+            << "  result  :  " << static_cast<uint32_t>(a) << " "
+                               << op_text;
+        if (b) {
+            std::cout << " " << static_cast<uint32_t>(*b);
+        }
+        std::cout
+            << " = " << static_cast<uint32_t>(result)
+            << " flags "
+            << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
+            << " " << DecodeFlags(flags)
+            << '\n'
+            << "  expected:  " << static_cast<uint32_t>(a) << " "
+            << op_text;
+        if (b) {
+            std::cout << " " << static_cast<uint32_t>(*b);
+        }
+        std::cout
+            << " = " << static_cast<uint32_t>(expected_result)
+            << " flags "
+            << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(expected_flags)
+            << " " << DecodeFlags(expected_flags)
+            << "\n\n";
+        std::cout << std::dec;
+        return 1;
     }
 
     template<typename Fn>
@@ -171,67 +198,15 @@ namespace
         std::cout << "Testing " << op_text << " (8x8 bit input, initial flags: " << DecodeFlags(initial_flags) << ")\n";
 
         int num_errors = 0;
-        std::cout << std::hex;
         for(unsigned int a = 0; a <= 255; ++a) {
             for(unsigned int b = 0; b <= 255; ++b) {
                 auto flags = initial_flags;
                 const auto result = op(flags, a, b);
 
                 const auto [ expected_result, expected_flags ] = tests[a * 256 + b];
-                if (expected_result == result && expected_flags == flags)
-                    continue;
-
-                ++num_errors;
-
-                std::cout
-                    << "*** ERROR: " << static_cast<uint32_t>(a)
-                                 << " " << op_text << " "
-                                 << static_cast<uint32_t>(b)
-                                 << " initial flags "
-                                 << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
-                                 << " " << DecodeFlags(flags)
-                                 << '\n';
-
-                if (expected_result != result)
-                {
-                    std::cout
-                            << "  !! RESULT MISMATCH: "
-                            << " got " << static_cast<uint32_t>(result)
-                            << " expected " << static_cast<uint32_t>(expected_result)
-                            << "\n";
-                }
-
-                if (expected_flags != flags)
-                {
-                    std::cout
-                            << "  !! FLAGS MISMATCH: "
-                            << " got " << static_cast<uint32_t>(flags)
-                            << " expected " << static_cast<uint32_t>(expected_flags)
-                            << "\n";
-                }
-
-                std::cout
-                    << "  result  :  " << static_cast<uint32_t>(a) << " "
-                                       << op_text << " "
-                                       << static_cast<uint32_t>(b)
-                                       << " = " << static_cast<uint32_t>(result)
-                                       << " flags "
-                                       << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
-                                       << " " << DecodeFlags(flags)
-                                       << '\n'
-                    << "  expected:  " << static_cast<uint32_t>(a) << " "
-                                       << op_text << " "
-                                       << static_cast<uint32_t>(b)
-                                       << " = " << static_cast<uint32_t>(expected_result)
-                                       << " flags "
-                                       << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(expected_flags)
-                                       << " " << DecodeFlags(expected_flags)
-                                       << '\n'
-                    << '\n';
-
+                num_errors += ProcessTestResult(op_text, a, b, initial_flags, result, flags, expected_result, expected_flags);
             }
         }
-        std::cout << std::dec;
         return num_errors;
     }
 
@@ -241,64 +216,13 @@ namespace
         std::cout << "Testing " << op_text << " (8 bit input, initial flags: " << DecodeFlags(initial_flags) << ")\n";
 
         int num_errors = 0;
-        std::cout << std::hex;
         for(unsigned int a = 0; a <= 255; ++a) {
             auto flags = initial_flags;
             const auto result = op(flags, a);
 
-            //std::cout << "   " << op_text << " " << static_cast<uint32_t>(a) << " --> " << static_cast<uint32_t>(result) << '\n';
-
             const auto [ expected_result, expected_flags ] = tests[a];
-            if (expected_result == result && expected_flags == flags)
-                continue;
-
-            ++num_errors;
-
-            std::cout
-                << "*** ERROR: " << static_cast<uint32_t>(a)
-                                << " " << op_text
-                                << " initial flags "
-                                << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
-                                << " " << DecodeFlags(flags)
-                                << '\n';
-
-            if (expected_result != result)
-            {
-                std::cout
-                        << "  !! RESULT MISMATCH: "
-                        << " got " << static_cast<uint32_t>(result)
-                        << " expected " << static_cast<uint32_t>(expected_result)
-                        << "\n";
-            }
-
-            if (expected_flags != flags)
-            {
-                std::cout
-                        << "  !! FLAGS MISMATCH: "
-                        << " got " << static_cast<uint32_t>(flags)
-                        << " expected " << static_cast<uint32_t>(expected_flags)
-                        << "\n";
-            }
-
-            std::cout
-                << "  result  :  " << static_cast<uint32_t>(a) << " "
-                                    << op_text
-                                    << " = " << static_cast<uint32_t>(result)
-                                    << " flags "
-                                    << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
-                                    << " " << DecodeFlags(flags)
-                                    << '\n'
-                << "  expected:  " << static_cast<uint32_t>(a) << " "
-                                    << op_text
-                                    << " = " << static_cast<uint32_t>(expected_result)
-                                    << " flags "
-                                    << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(expected_flags)
-                                    << " " << DecodeFlags(expected_flags)
-                                    << '\n'
-                << '\n';
-
+            num_errors += ProcessTestResult(op_text, a, {}, initial_flags, result, flags, expected_result, expected_flags);
         }
-        std::cout << std::dec;
         return num_errors;
     }
 
@@ -308,62 +232,13 @@ namespace
         std::cout << "Testing " << op_text << " (16 bit input, initial flags: " << DecodeFlags(initial_flags) << ")\n";
 
         int num_errors = 0;
-        std::cout << std::hex;
         for(unsigned int a = 0; a <= 65535; ++a) {
             auto flags = initial_flags;
             const auto result = op(flags, a);
 
             const auto [ expected_result, expected_flags ] = tests[a];
-            if (expected_result == result && expected_flags == flags)
-                continue;
-
-            ++num_errors;
-
-            std::cout
-                << "*** ERROR: " << static_cast<uint32_t>(a)
-                                << " " << op_text
-                                << " initial flags "
-                                << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
-                                << " " << DecodeFlags(flags)
-                                << '\n';
-
-            if (expected_result != result)
-            {
-                std::cout
-                        << "  !! RESULT MISMATCH: "
-                        << " got " << static_cast<uint32_t>(result)
-                        << " expected " << static_cast<uint32_t>(expected_result)
-                        << "\n";
-            }
-
-            if (expected_flags != flags)
-            {
-                std::cout
-                        << "  !! FLAGS MISMATCH: "
-                        << " got " << static_cast<uint32_t>(flags)
-                        << " expected " << static_cast<uint32_t>(expected_flags)
-                        << "\n";
-            }
-
-            std::cout
-                << "  result  :  " << static_cast<uint32_t>(a) << " "
-                                    << op_text
-                                    << " = " << static_cast<uint32_t>(result)
-                                    << " flags "
-                                    << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
-                                    << " " << DecodeFlags(flags)
-                                    << '\n'
-                << "  expected:  " << static_cast<uint32_t>(a) << " "
-                                    << op_text
-                                    << " = " << static_cast<uint32_t>(expected_result)
-                                    << " flags "
-                                    << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(expected_flags)
-                                    << " " << DecodeFlags(expected_flags)
-                                    << '\n'
-                << '\n';
-
+            num_errors += ProcessTestResult(op_text, a, {}, initial_flags, result, flags, expected_result, expected_flags);
         }
-        std::cout << std::dec;
         return num_errors;
     }
 
