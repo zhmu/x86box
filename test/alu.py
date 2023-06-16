@@ -22,11 +22,10 @@ def load_tests_8(fname):
 
     tests = []
     while t:
-        for val1 in range(0, 256):
-            b = t[0:3]
-            t = t[3:]
-            exp_val, exp_flags = struct.unpack('<BH', b)
-            tests.append((exp_val, exp_flags))
+        b = t[0:3]
+        t = t[3:]
+        exp_val, exp_flags = struct.unpack('<BH', b)
+        tests.append((exp_val, exp_flags))
     return tests
 
 def load_tests_16(fname):
@@ -35,11 +34,10 @@ def load_tests_16(fname):
 
     tests = []
     while t:
-        for val1 in range(0, 65536):
-            b = t[0:4]
-            t = t[4:]
-            exp_val, exp_flags = struct.unpack('<HH', b)
-            tests.append((exp_val, exp_flags))
+        b = t[0:4]
+        t = t[4:]
+        exp_val, exp_flags = struct.unpack('<HH', b)
+        tests.append((exp_val, exp_flags))
     return tests
 
 CF = (1 << 0)
@@ -358,6 +356,8 @@ def my_das(a, fl):
     old_cf = 1 if fl & CF else 0
     new_fl = fl & ~CF
     if (a & 0xf) > 9 or (fl & AF):
+        if old_cf or (res & 0xff) < 6:
+            new_fl = fl | CF
         res = (res - 6) & 0xff
         new_fl = new_fl | AF
     else:
@@ -366,8 +366,6 @@ def my_das(a, fl):
     if a > 0x99 or old_cf:
         res = (res - 0x60) & 0xff
         new_fl = new_fl | CF
-    else:
-        new_fl = new_fl & ~CF
 
     new_fl = set_flags_pzs(res, new_fl)
     return (res, new_fl)
@@ -400,6 +398,7 @@ def my_aas(a, fl):
     return (a, new_fl)
 
 def verify_op8x8(tests, op_text, op_fn, initial_flags):
+    assert len(tests) == 256 * 256
     print('Testing %s (8x8 bit input, initial flags: %s)' % (op_text, decode_flags(initial_flags)))
     for a in range(0, 256):
         for b in range(0, 256):
@@ -431,6 +430,7 @@ def verify_op8x8(tests, op_text, op_fn, initial_flags):
     return True
 
 def verify_op8(tests, op_text, op_fn, initial_flags):
+    assert len(tests) == 256
     print('Testing %s (8 bit input, initial flags: %s)' % (op_text, decode_flags(initial_flags)))
     for a in range(0, 256):
         (t_res, t_fl) = tests[a]
@@ -456,6 +456,7 @@ def verify_op8(tests, op_text, op_fn, initial_flags):
     return True
 
 def verify_op16(tests, op_text, op_fn, initial_flags):
+    assert len(tests) == 65536
     print('Testing %s (16 bit input, initial flags: %s)' % (op_text, decode_flags(initial_flags)))
     for a in range(0, 65536):
         (t_res, t_fl) = tests[a]
@@ -591,17 +592,35 @@ if not verify_op8(neg_tests, "neg", my_neg, ON):
     quit()
 
 daa_tests = load_tests_8("daa.bin")
-if not verify_op8(daa_tests, "daa", my_daa, ON):
+if not verify_op8(daa_tests[:256], "daa", my_daa, ON):
     quit()
+if not verify_op8(daa_tests[256:512], "daa", my_daa, ON | CF):
+    quit()
+if not verify_op8(daa_tests[512:768], "daa", my_daa, ON | AF):
+    quit()
+if not verify_op8(daa_tests[768:], "daa", my_daa, ON | CF | AF):
+    quit()
+
 das_tests = load_tests_8("das.bin")
-if not verify_op8(das_tests, "das", my_das, ON):
+if not verify_op8(das_tests[:256], "das", my_das, ON):
+    quit()
+if not verify_op8(das_tests[256:512], "das", my_das, ON | CF):
+    quit()
+if not verify_op8(das_tests[512:768], "das", my_das, ON | AF):
+    quit()
+if not verify_op8(das_tests[768:], "das", my_das, ON | CF | AF):
     quit()
 
 aaa_tests = load_tests_16("aaa.bin")
-if not verify_op16(aaa_tests, "aaa", my_aaa, ON):
+if not verify_op16(aaa_tests[:65536], "aaa", my_aaa, ON):
     quit()
+if not verify_op16(aaa_tests[65536:], "aaa", my_aaa, ON | AF):
+    quit()
+
 aas_tests = load_tests_16("aas.bin")
-if not verify_op16(aas_tests, "aas", my_aas, ON):
+if not verify_op16(aas_tests[:65536], "aas", my_aas, ON):
+    quit()
+if not verify_op16(aas_tests[65536:], "aas", my_aas, ON | AF):
     quit()
 
 # TODO: need to think about how to test these...
