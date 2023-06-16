@@ -300,7 +300,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x27: /* DAA */ {
-            todo();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::DAA(m_State.m_flags, m_State.m_ax & 0xff);
             break;
         }
         case 0x28: /* SUB Eb Gb */ {
@@ -335,7 +335,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x2f: /* DAS */ {
-            todo();
+            m_State.m_ax = (m_State.m_ax & 0xff00) | alu::DAS(m_State.m_flags, m_State.m_ax & 0xff);
             break;
         }
         case 0x30: /* XOR Eb Gb */ {
@@ -370,7 +370,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x37: /* AAA */ {
-            todo();
+            m_State.m_ax = alu::AAA(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x38: /* CMP Eb Gb */ {
@@ -417,7 +417,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x3f: /* AAS */ {
-            todo();
+            m_State.m_ax = alu::AAS(m_State.m_flags, m_State.m_ax);
             break;
         }
         case 0x40: /* INC eAX */ {
