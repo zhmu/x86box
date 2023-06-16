@@ -375,6 +375,84 @@ namespace alu {
         [[maybe_unused]] const auto _ = AND<BITS>(flags, a, b);
     }
 
+    constexpr uint8_t DAA(cpu::Flags& flags, uint8_t v)
+    {
+        uint8_t res = v;
+        const bool initial_cf = cpu::FlagCarry(flags);
+        if ((v & 0xf) > 9 || cpu::FlagAuxiliaryCarry(flags)) {
+            res = (res + 6) & 0xff;
+            cpu::SetFlag<cpu::flag::AF>(flags, true);
+        } else {
+            cpu::SetFlag<cpu::flag::AF>(flags, false);
+        }
+
+        if ((v > 0x99) || initial_cf) {
+            res = (res + 0x60) & 0xff;
+            cpu::SetFlag<cpu::flag::CF>(flags, true);
+        } else {
+            cpu::SetFlag<cpu::flag::CF>(flags, false);
+        }
+
+        SetFlagsSZP<8>(flags, res);
+        return res;
+    }
+
+    constexpr uint8_t DAS(cpu::Flags& flags, uint8_t v)
+    {
+        uint8_t res = v;
+        const bool initial_cf = cpu::FlagCarry(flags);
+
+        cpu::SetFlag<cpu::flag::CF>(flags, false);
+        if ((v & 0xf) > 9 || cpu::FlagAuxiliaryCarry(flags)) {
+            if (initial_cf || (res & 0xff) < 6) {
+                cpu::SetFlag<cpu::flag::CF>(flags, true);
+            }
+            res = (res - 6) & 0xff;
+            cpu::SetFlag<cpu::flag::AF>(flags, true);
+        } else {
+            cpu::SetFlag<cpu::flag::AF>(flags, false);
+        }
+
+        if ((v > 0x99) || initial_cf) {
+            res = (res - 0x60) & 0xff;
+            cpu::SetFlag<cpu::flag::CF>(flags, true);
+        }
+
+        SetFlagsSZP<8>(flags, res);
+        return res;
+    }
+
+    constexpr uint16_t AAA(cpu::Flags& flags, uint16_t v)
+    {
+        uint16_t res = v;
+        if ((v & 0xf) > 9 || cpu::FlagAuxiliaryCarry(flags)) {
+            res = (res + 0x106) & 0xffff;
+            cpu::SetFlag<cpu::flag::CF>(flags, true);
+            cpu::SetFlag<cpu::flag::AF>(flags, true);
+        } else {
+            cpu::SetFlag<cpu::flag::CF>(flags, false);
+            cpu::SetFlag<cpu::flag::AF>(flags, false);
+        }
+        return res & 0xff0f;
+    }
+
+    constexpr uint16_t AAS(cpu::Flags& flags, uint16_t v)
+    {
+        uint16_t res = v;
+        if ((v & 0xf) > 9 || cpu::FlagAuxiliaryCarry(flags)) {
+            res = (res - 0x6) & 0xffff;
+            const uint8_t ah = (((res & 0xff00) >> 8) - 1) & 0xff;
+            res = (res & 0xff) | (ah << 8);
+
+            cpu::SetFlag<cpu::flag::CF>(flags, true);
+            cpu::SetFlag<cpu::flag::AF>(flags, true);
+        } else {
+            cpu::SetFlag<cpu::flag::CF>(flags, false);
+            cpu::SetFlag<cpu::flag::AF>(flags, false);
+        }
+        return res & 0xff0f;
+    }
+
     constexpr void Mul8(cpu::Flags& flags, uint16_t& ax, uint8_t a)
     {
         flags &= ~(cpu::flag::CF | cpu::flag::OF);

@@ -18,6 +18,11 @@ namespace
         cpu::Flags flags;
     };
 
+    struct TestInput16 {
+        uint16_t result;
+        cpu::Flags flags;
+    };
+
     template<typename T>
     bool TryRead(std::ifstream& ifs, T& result)
     {
@@ -48,11 +53,23 @@ namespace
         return s;
     }
 
-    std::vector<TestInput8> ReadTestData(std::ifstream& ifs, unsigned int amount)
+    std::vector<TestInput8> ReadTestData8(std::ifstream& ifs, unsigned int amount)
     {
         std::vector<TestInput8> result;
         for (unsigned int n = 0; n < amount; ++n) {
             TestInput8 ti;
+            if (!TryRead(ifs, ti.result) || !TryRead(ifs, ti.flags))
+                throw std::runtime_error("read error");
+            result.push_back(ti);
+        }
+        return result;
+    }
+
+    std::vector<TestInput16> ReadTestData16(std::ifstream& ifs, unsigned int amount)
+    {
+        std::vector<TestInput16> result;
+        for (unsigned int n = 0; n < amount; ++n) {
+            TestInput16 ti;
             if (!TryRead(ifs, ti.result) || !TryRead(ifs, ti.flags))
                 throw std::runtime_error("read error");
             result.push_back(ti);
@@ -65,7 +82,7 @@ namespace
         std::ifstream ifs(path, std::ios::binary);
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
-        auto result = ReadTestData(ifs, 256 * 256);
+        auto result = ReadTestData8(ifs, 256 * 256);
         if (result.size() != 65536)
             throw std::runtime_error("invalid number of tests in '"s + path + "'");
         return result;
@@ -76,10 +93,10 @@ namespace
         std::ifstream ifs(path, std::ios::binary);
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
-        auto result_without_carry = ReadTestData(ifs, 256 * 256);
+        auto result_without_carry = ReadTestData8(ifs, 256 * 256);
         if (result_without_carry.size() != 65536)
             throw std::runtime_error("invalid number of tests without carry in '"s + path + "'");
-        auto result_with_carry = ReadTestData(ifs, 256 * 256);
+        auto result_with_carry = ReadTestData8(ifs, 256 * 256);
         if (result_with_carry.size() != 65536)
             throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
 
@@ -91,7 +108,7 @@ namespace
         std::ifstream ifs(path, std::ios::binary);
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
-        auto result = ReadTestData(ifs, 256);
+        auto result = ReadTestData8(ifs, 256);
         if (result.size() != 256)
             throw std::runtime_error("invalid number of tests in '"s + path + "'");
         return result;
@@ -102,11 +119,47 @@ namespace
         std::ifstream ifs(path, std::ios::binary);
         if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
 
-        auto result_without_carry = ReadTestData(ifs, 256);
+        auto result_without_carry = ReadTestData8(ifs, 256);
         if (result_without_carry.size() != 256)
             throw std::runtime_error("invalid number of tests without carry in '"s + path + "'");
-        auto result_with_carry = ReadTestData(ifs, 256);
+        auto result_with_carry = ReadTestData8(ifs, 256);
         if (result_with_carry.size() != 256)
+            throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
+
+        return { result_without_carry, result_with_carry };
+    }
+
+    std::tuple<std::vector<TestInput8>, std::vector<TestInput8>, std::vector<TestInput8>, std::vector<TestInput8>> LoadTests8WithCarryAndAuxCarry(const std::string& path)
+    {
+        std::ifstream ifs(path, std::ios::binary);
+        if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
+
+        auto result_0 = ReadTestData8(ifs, 256);
+        if (result_0.size() != 256)
+            throw std::runtime_error("invalid number of tests in '"s + path + "'");
+        auto result_cf = ReadTestData8(ifs, 256);
+        if (result_cf.size() != 256)
+            throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
+        auto result_af = ReadTestData8(ifs, 256);
+        if (result_cf.size() != 256)
+            throw std::runtime_error("invalid number of tests with aux carry in '"s + path + "'");
+        auto result_cf_af = ReadTestData8(ifs, 256);
+        if (result_cf_af.size() != 256)
+            throw std::runtime_error("invalid number of tests with carry+aux caerry in '"s + path + "'");
+
+        return { result_0, result_cf, result_af, result_cf_af };
+    }
+
+    std::pair<std::vector<TestInput16>, std::vector<TestInput16>> LoadTests16WithCarry(const std::string& path)
+    {
+        std::ifstream ifs(path, std::ios::binary);
+        if (!ifs) throw std::runtime_error("cannot open '"s + path + "'");
+
+        auto result_without_carry = ReadTestData16(ifs, 65536);
+        if (result_without_carry.size() != 65536)
+            throw std::runtime_error("invalid number of tests without carry in '"s + path + "'");
+        auto result_with_carry = ReadTestData16(ifs, 65536);
+        if (result_with_carry.size() != 65536)
             throw std::runtime_error("invalid number of tests with carry in '"s + path + "'");
 
         return { result_without_carry, result_with_carry };
@@ -193,6 +246,73 @@ namespace
             auto flags = initial_flags;
             const auto result = op(flags, a);
 
+            //std::cout << "   " << op_text << " " << static_cast<uint32_t>(a) << " --> " << static_cast<uint32_t>(result) << '\n';
+
+            const auto [ expected_result, expected_flags ] = tests[a];
+            if (expected_result == result && expected_flags == flags)
+                continue;
+
+            ++num_errors;
+
+            std::cout
+                << "*** ERROR: " << static_cast<uint32_t>(a)
+                                << " " << op_text
+                                << " initial flags "
+                                << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
+                                << " " << DecodeFlags(flags)
+                                << '\n';
+
+            if (expected_result != result)
+            {
+                std::cout
+                        << "  !! RESULT MISMATCH: "
+                        << " got " << static_cast<uint32_t>(result)
+                        << " expected " << static_cast<uint32_t>(expected_result)
+                        << "\n";
+            }
+
+            if (expected_flags != flags)
+            {
+                std::cout
+                        << "  !! FLAGS MISMATCH: "
+                        << " got " << static_cast<uint32_t>(flags)
+                        << " expected " << static_cast<uint32_t>(expected_flags)
+                        << "\n";
+            }
+
+            std::cout
+                << "  result  :  " << static_cast<uint32_t>(a) << " "
+                                    << op_text
+                                    << " = " << static_cast<uint32_t>(result)
+                                    << " flags "
+                                    << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(flags)
+                                    << " " << DecodeFlags(flags)
+                                    << '\n'
+                << "  expected:  " << static_cast<uint32_t>(a) << " "
+                                    << op_text
+                                    << " = " << static_cast<uint32_t>(expected_result)
+                                    << " flags "
+                                    << std::setfill('0') << std::setw(4) << static_cast<uint32_t>(expected_flags)
+                                    << " " << DecodeFlags(expected_flags)
+                                    << '\n'
+                << '\n';
+
+        }
+        std::cout << std::dec;
+        return num_errors;
+    }
+
+    template<typename Fn>
+    int VerifyOp16(const std::vector<TestInput16>& tests, std::string_view op_text, Fn op, cpu::Flags initial_flags)
+    {
+        std::cout << "Testing " << op_text << " (16 bit input, initial flags: " << DecodeFlags(initial_flags) << ")\n";
+
+        int num_errors = 0;
+        std::cout << std::hex;
+        for(unsigned int a = 0; a <= 65535; ++a) {
+            auto flags = initial_flags;
+            const auto result = op(flags, a);
+
             const auto [ expected_result, expected_flags ] = tests[a];
             if (expected_result == result && expected_flags == flags)
                 continue;
@@ -267,8 +387,18 @@ namespace
         struct Test8WithCarry {
             TestFn8 fn;
         };
+        struct Test8WithCarryAndAuxCarry {
+            TestFn8 fn;
+        };
+        struct Test8WithAuxCarry {
+            TestFn8 fn;
+        };
+        using TestFn16 = uint16_t(*)(cpu::Flags&, uint16_t);
+        struct Test16WithAuxCarry {
+            TestFn16 fn;
+        };
         using TestType = std::variant<
-            Test8x8, Test8x8WithCarry, Test8, Test8WithCarry
+            Test8x8, Test8x8WithCarry, Test8, Test8WithCarry, Test8WithCarryAndAuxCarry, Test8WithAuxCarry, Test16WithAuxCarry
         >;
 
         using TestVector = std::tuple<std::string_view, std::string_view, TestType>;
@@ -346,20 +476,18 @@ namespace
             TestVector{"neg8.bin", "neg", Test8{ [](auto& flags, auto a) -> uint8_t {
                 return cpu::alu::NEG<8>(flags, a);
             } } },
-    #if 0
-            TestVector{"daa.bin", "daa", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::Daa(flags, a);
+            TestVector{"daa.bin", "daa", Test8WithCarryAndAuxCarry{ [](auto& flags, auto a) -> uint8_t {
+                return cpu::alu::DAA(flags, a);
             } } },
-            TestVector{"das.bin", "das", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::Das(flags, a);
+            TestVector{"das.bin", "das", Test8WithCarryAndAuxCarry{ [](auto& flags, auto a) -> uint8_t {
+                return cpu::alu::DAS(flags, a);
             } } },
-            TestVector{"aaa.bin", "aaa", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::Aaa(flags, a);
+            TestVector{"aaa.bin", "aaa", Test16WithAuxCarry{ [](auto& flags, auto a) -> uint16_t {
+                return cpu::alu::AAA(flags, a);
             } } },
-            TestVector{"aas.bin", "aas", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::Aas(flags, a);
+            TestVector{"aas.bin", "aas", Test16WithAuxCarry{ [](auto& flags, auto a) -> uint16_t {
+                return cpu::alu::AAS(flags, a);
             } } },
-    #endif
         };
     }
 
@@ -396,6 +524,26 @@ namespace
                     return
                         VerifyOp8(test_data_without_carry, test_name, test.fn, cpu::flag::ON) +
                         VerifyOp8(test_data_with_carry, test_name, test.fn, cpu::flag::ON | cpu::flag::CF);
+                },
+                [&](const tests::Test8WithAuxCarry& test) {
+                    const auto [ test_data_0, test_data_af ]  = LoadTests8WithCarry(test_file);
+                    return
+                        VerifyOp8(test_data_0, test_name, test.fn, cpu::flag::ON) +
+                        VerifyOp8(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF);
+                },
+                [&](const tests::Test8WithCarryAndAuxCarry& test) {
+                    const auto [ test_data_0, test_data_cf, test_data_af, test_data_cf_af ]  = LoadTests8WithCarryAndAuxCarry(test_file);
+                    return
+                        VerifyOp8(test_data_0, test_name, test.fn, cpu::flag::ON) +
+                        VerifyOp8(test_data_cf, test_name, test.fn, cpu::flag::ON | cpu::flag::CF) +
+                        VerifyOp8(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF) +
+                        VerifyOp8(test_data_cf_af, test_name, test.fn, cpu::flag::ON | cpu::flag::CF | cpu::flag::AF);
+                },
+                [&](const tests::Test16WithAuxCarry& test) {
+                    const auto [ test_data_0, test_data_af ]  = LoadTests16WithCarry(test_file);
+                    return
+                        VerifyOp16(test_data_0, test_name, test.fn, cpu::flag::ON) +
+                        VerifyOp16(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF);
                 },
             }, test_data);
         }
