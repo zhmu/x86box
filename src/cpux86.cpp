@@ -1456,11 +1456,18 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xd4: /* AAM I0 */ {
-            todo();
+            const auto imm = getImm8();
+            const auto result = alu::AAM(m_State.m_flags, m_State.m_ax & 0xff, imm);
+            if (result) {
+                m_State.m_ax = *result;
+            } else {
+                SignalInterrupt(INT_DIV_BY_ZERO);
+            }
             break;
         }
         case 0xd5: /* AAD I0 */ {
-            todo();
+            const auto imm = getImm8();
+            m_State.m_ax = alu::AAD(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
         case 0xd6: /* -- */ {
