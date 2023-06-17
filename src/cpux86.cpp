@@ -71,6 +71,13 @@ namespace
         uint16_t b = getImm8();
         return a | (b << 8);
     }
+
+    uint16_t ExtendSign8To16(const uint8_t v)
+    {
+        if (v & 0x80)
+            return 0xff00 | v;
+        return v;
+    }
 }
 
 void CPUx86::RunInstruction()
@@ -761,7 +768,7 @@ void CPUx86::RunInstruction()
         case 0x83: /* GRP1 Ev Ib */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            const auto imm = getImm8();
+            const auto imm = ExtendSign8To16(getImm8());
 
             uint16_t val = ReadEA16(m_DecodeState);
             unsigned int op = ModRm_XXX(modrm);
