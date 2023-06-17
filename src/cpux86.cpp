@@ -62,15 +62,22 @@ namespace
     }
 }
 
+namespace
+{
+    template<typename Fn>
+    uint16_t GetImm16(Fn getImm8)
+    {
+        uint16_t a = getImm8();
+        uint16_t b = getImm8();
+        return a | (b << 8);
+    }
+}
+
 void CPUx86::RunInstruction()
 {
     auto getImm8 = [&]() { return GetNextOpcode(); };
     auto getModRm = [&]() { return GetNextOpcode(); };
-    auto getImm16 = [&]() -> uint16_t {
-        uint16_t a = GetNextOpcode();
-        uint16_t b = GetNextOpcode();
-        return a | (b << 8);
-    };
+    auto getImm16 = [&]() { return GetImm16(getImm8); };
 
     auto handleConditionalJump = [&](bool take) {
         const auto imm = getImm8();
@@ -97,14 +104,14 @@ void CPUx86::RunInstruction()
      */
 
     // op Ev Gv -> Ev = op(Ev, Gv)
-    auto opEvGv = [&]<typename Fn> (Fn op) {
+    auto opEvGv = [&](auto op) {
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
         WriteEA16(m_DecodeState, op(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))));
     };
 
     // op Gv Ev -> Gv = op(Gv, Ev)
-    auto opGvEv = [&]<typename Fn> (Fn op) {
+    auto opGvEv = [&](auto op) {
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
         uint16_t& reg = GetReg16(ModRm_XXX(modrm));
@@ -112,7 +119,7 @@ void CPUx86::RunInstruction()
     };
 
     // Op Eb Gb -> Eb = op(Eb, Gb)
-    auto opEbGb = [&]<typename Fn> (Fn op) {
+    auto opEbGb = [&](auto op) {
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
         unsigned int shift;
@@ -121,7 +128,7 @@ void CPUx86::RunInstruction()
     };
 
     // Op Gb Eb -> Gb = op(Gb, Eb)
-    auto opGbEb = [&]<typename Fn> (Fn op) {
+    auto opGbEb = [&](auto op) {
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
         unsigned int shift;
@@ -1480,36 +1487,16 @@ void CPUx86::RunInstruction()
                            m_Memory.ReadByte(MakeAddr(seg, m_State.m_bx + m_State.m_ax & 0xff));
             break;
         }
-        case 0xd8: /* -- */ {
-            invalidOpcode();
-            break;
-        }
-        case 0xd9: /* -- */ {
-            invalidOpcode();
-            break;
-        }
-        case 0xda: /* -- */ {
-            invalidOpcode();
-            break;
-        }
-        case 0xdb: /* -- */ {
-            invalidOpcode();
-            break;
-        }
-        case 0xdc: /* -- */ {
-            invalidOpcode();
-            break;
-        }
-        case 0xdd: /* -- */ {
-            invalidOpcode();
-            break;
-        }
-        case 0xde: /* -- */ {
-            invalidOpcode();
-            break;
-        }
-        case 0xdf: /* -- */ {
-            invalidOpcode();
+        case 0xd8: /* ESC/0 */
+        case 0xd9: /* ESC/1 */
+        case 0xda: /* ESC/2 */
+        case 0xdb: /* ESC/3 */
+        case 0xdc: /* ESC/4 */
+        case 0xdd: /* ESC/5 */
+        case 0xde: /* ESC/6 */
+        case 0xdf: /* ESC/7 */ {
+            const auto imm = getImm16();
+            spdlog::warn("ignoring unimplemented FPU instruction {:x}", imm);
             break;
         }
         case 0xe0: /* LOOPNZ Jb */ {
@@ -1563,8 +1550,10 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xea: /* JMP Ap */ {
-            m_State.m_ip = getImm16();
-            m_State.m_cs = getImm16();
+            const auto ip = getImm16();
+            const auto cs = getImm16();
+            m_State.m_ip = ip;
+            m_State.m_cs = cs;
             break;
         }
         case 0xeb: /* JMP Jb */ {
@@ -1806,11 +1795,7 @@ CPUx86::addr_t CPUx86::MakeAddr(uint16_t seg, uint16_t off)
 void CPUx86::DecodeEA(uint8_t modrm, DecodeState& oState)
 {
     auto getImm8 = [&]() { return GetNextOpcode(); };
-    auto getImm16 = [&]() -> uint16_t {
-        uint16_t a = GetNextOpcode();
-        uint16_t b = GetNextOpcode();
-        return a | (b << 8);
-    };
+    auto getImm16 = [&]() { return GetImm16(getImm8); };
 
     const uint8_t mod = (modrm & 0xc0) >> 6;
     const uint8_t rm = modrm & 7;
