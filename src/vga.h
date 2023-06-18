@@ -3,12 +3,13 @@
 
 #include <memory>
 #include "memory.h"
+#include "io.h"
 
 class IO;
 class HostIO;
 class Vectors;
 
-class VGA : public XMemoryMapped
+class VGA : XMemoryMapped, IOPeripheral
 {
   public:
     VGA(Memory& memory, IO& io, HostIO& hostio);
@@ -17,11 +18,16 @@ class VGA : public XMemoryMapped
     virtual void Reset();
     virtual void Update();
 
-    virtual uint8_t ReadByte(Memory::Address addr);
-    virtual uint16_t ReadWord(Memory::Address addr);
+    uint8_t ReadByte(Memory::Address addr) override;
+    uint16_t ReadWord(Memory::Address addr) override;
 
-    virtual void WriteByte(Memory::Address addr, uint8_t data);
-    virtual void WriteWord(Memory::Address addr, uint16_t data);
+    void WriteByte(Memory::Address addr, uint8_t data) override;
+    void WriteWord(Memory::Address addr, uint16_t data) override;
+
+    void Out8(io_port port, uint8_t val) override;
+    void Out16(io_port port, uint16_t val) override;
+    uint8_t In8(io_port port) override;
+    uint16_t In16(io_port port) override;
 
     // XXX Resolution for now
     static constexpr inline unsigned int s_video_width = 640;
