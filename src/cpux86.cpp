@@ -60,6 +60,11 @@ namespace
         state.m_prefix &= ~cpu::State::PREFIX_SEG;
         return state.m_seg_override;
     }
+
+    [[noreturn]] void Unreachable()
+    {
+        __builtin_unreachable();
+    }
 }
 
 namespace
@@ -143,8 +148,35 @@ void CPUx86::RunInstruction()
         SetReg8(reg, shift, op(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)));
     };
 
-    const auto opcode = GetNextOpcode();
+    auto opcode = GetNextOpcode();
     spdlog::debug("cs:ip={:04x}:{:04x} opcode {:02x}", m_State.m_cs, m_State.m_ip - 1, opcode);
+
+    // Handle prefixes first
+    m_State.m_prefix = 0;
+    m_State.m_seg_override = 0;
+    while(true) {
+        if (opcode == 0x26) { /* ES: */
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
+            m_State.m_seg_override = SEG_ES;
+        } else if (opcode == 0x2e) { /* CS: */
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
+            m_State.m_seg_override = SEG_CS;
+        } else if (opcode == 0x36) {/* SS: */
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
+            m_State.m_seg_override = SEG_SS;
+        } else if (opcode == 0x3e) {/* DS: */
+            m_State.m_prefix |= cpu::State::PREFIX_SEG;
+            m_State.m_seg_override = SEG_DS;
+        } else if (opcode == 0xf2) { /* REPNZ */
+            m_State.m_prefix |= cpu::State::PREFIX_REPNZ;
+        } else if (opcode == 0xf3) { /* REPZ */
+            m_State.m_prefix |= cpu::State::PREFIX_REPZ;
+        } else {
+            break;
+        }
+        opcode = GetNextOpcode();
+    }
+
     switch (opcode) {
         case 0x00: /* ADD Eb Gb */ {
             opEbGb(cpu::alu::ADD<8>);
@@ -308,9 +340,8 @@ void CPUx86::RunInstruction()
             m_State.m_ax = alu::AND<16>(m_State.m_flags, m_State.m_ax, imm);
             break;
         }
-        case 0x26: /* ES: */ {
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_ES;
+        case 0x26: /* ES: */{
+            Unreachable();
             break;
         }
         case 0x27: /* DAA */ {
@@ -344,8 +375,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x2e: /* CS: */ {
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_CS;
+            Unreachable();
             break;
         }
         case 0x2f: /* DAS */ {
@@ -379,8 +409,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x36: /* SS: */ {
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_SS;
+            Unreachable();
             break;
         }
         case 0x37: /* AAA */ {
@@ -426,8 +455,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x3e: /* DS: */ {
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_DS;
+            Unreachable();
             break;
         }
         case 0x3f: /* AAS */ {
@@ -1591,12 +1619,9 @@ void CPUx86::RunInstruction()
             invalidOpcode();
             break;
         }
-        case 0xf2: /* REPNZ */ {
-            m_State.m_prefix |= cpu::State::PREFIX_REPNZ;
-            break;
-        }
+        case 0xf2: /* REPNZ */
         case 0xf3: /* REPZ */ {
-            m_State.m_prefix |= cpu::State::PREFIX_REPZ;
+            Unreachable();
             break;
         }
         case 0xf4: /* HLT */ {
@@ -1910,7 +1935,8 @@ uint16_t CPUx86::ReadEA16(const DecodeState& oState)
             seg_base = m_State.m_ss;
             break;
         default:
-            std::abort();
+            Unreachable();
+            break;
     }
 
     spdlog::info("read(16) @ {:04x}:{:04x} -> {:x}",
@@ -1941,7 +1967,8 @@ void CPUx86::WriteEA16(const DecodeState& oState, uint16_t value)
             seg_base = m_State.m_ss;
             break;
         default:
-            std::abort();
+            Unreachable();
+            break;
     }
 
     spdlog::info("write(16) @ {:04x}:{:04x} value {:x}", seg_base, oState.m_off + oState.m_disp, value);
@@ -1971,7 +1998,7 @@ uint8_t CPUx86::ReadEA8(const DecodeState& oState)
             seg_base = m_State.m_ss;
             break;
         default:
-            std::abort();
+            Unreachable();
     }
 
     spdlog::info("read(8) @ {:04x}:{:04x}", seg_base, oState.m_off + oState.m_disp);
@@ -2002,7 +2029,7 @@ void CPUx86::WriteEA8(const DecodeState& oState, uint8_t val)
             seg_base = m_State.m_ss;
             break;
         default:
-            std::abort();
+            Unreachable();
     }
 
     spdlog::info("write(8) @ {:04x}:{:04x} value {:x}", seg_base, oState.m_off + oState.m_disp, val);
@@ -2029,7 +2056,7 @@ uint16_t& CPUx86::GetReg16(int n)
         case 7:
             return m_State.m_di;
     }
-    std::abort();
+    Unreachable();
 }
 
 uint16_t& CPUx86::GetSReg16(int n)
@@ -2044,7 +2071,7 @@ uint16_t& CPUx86::GetSReg16(int n)
         case SEG_DS:
             return m_State.m_ds;
     }
-    std::abort();
+    Unreachable();
 }
 
 uint16_t& CPUx86::GetReg8(int n, unsigned int& shift)
@@ -2060,7 +2087,7 @@ uint16_t& CPUx86::GetReg8(int n, unsigned int& shift)
         case 3:
             return m_State.m_bx;
     }
-    std::abort();
+    Unreachable();
 }
 
 void CPUx86::SetReg8(uint16_t& reg, unsigned int shift, uint8_t val)
