@@ -1,7 +1,6 @@
 #include "cpux86.h"
 #include "io.h"
 #include "memory.h"
-#include "vectors.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <bit>
@@ -10,8 +9,8 @@
 
 #include "spdlog/spdlog.h"
 
-CPUx86::CPUx86(Memory& oMemory, IO& oIO, Vectors& oVectors)
-    : m_Memory(oMemory), m_IO(oIO), m_Vectors(oVectors)
+CPUx86::CPUx86(Memory& oMemory, IO& oIO)
+    : m_Memory(oMemory), m_IO(oIO)
 {
 }
 
@@ -243,7 +242,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x0f: /* -- */ {
-            Handle0FPrefix();
+            invalidOpcode();
             break;
         }
         case 0x10: /* ADC Eb Gb */ {
@@ -1795,25 +1794,6 @@ void CPUx86::RunInstruction()
     }
 }
 
-void CPUx86::Handle0FPrefix()
-{
-    auto getImm8 = [&]() { return GetNextOpcode(); };
-    auto invalidOpcode = []() { spdlog::error("invalidOpcode()\n"); std::abort(); };
-
-    uint8_t opcode = GetNextOpcode();
-    spdlog::debug("cs:ip={:04x}:{:04x} opcode 0f {:02x}", m_State.m_cs, m_State.m_ip - 1, opcode);
-    switch (opcode) {
-        case 0x34: /* SYSENTER - (ab)used for interrupt dispatch */ {
-            const auto imm = getImm8();
-            m_Vectors.Invoke(*this, imm);
-            break;
-        }
-        default: /* undefined */
-            invalidOpcode();
-            break;
-    }
-}
-
 uint8_t CPUx86::GetNextOpcode()
 {
     return m_Memory.ReadByte(MakeAddr(m_State.m_cs, m_State.m_ip++));
@@ -2135,50 +2115,15 @@ void CPUx86::SignalInterrupt(uint8_t no)
 
 void CPUx86::HandleInterrupt(uint8_t no)
 {
-    addr_t addr = MakeAddr(0, no * 4);
-    uint16_t off = m_Memory.ReadWord(addr + 0);
-
     // Push flags and return address
     Push16(m_State.m_flags);
     Push16(m_State.m_cs);
     Push16(m_State.m_ip);
 
     // Transfer control to interrupt
-    m_State.m_cs = m_Memory.ReadWord(addr + 2);
-    m_State.m_ip = m_Memory.ReadWord(addr + 0);
-
-    spdlog::warn("SignalInterrupt(): no -> {:04x}:{:04x}", no, m_State.m_cs, m_State.m_ip);
-
-    // XXX Kludge
-    if (m_State.m_cs == 0 && m_State.m_ip == 0)
-        abort();
-
-#if 0
-	/* XXX KLUDGE */
-	if (no == 0x10 && m_State.m_ax >> 8 == 0xf) {
-		/* Video: get video mode; we return 80x25x16 */
-		m_State.m_ax = 3;
-		return;
-	}
-
-	/* XXX BEUN */
-	if (no == 0x20) {
-		m_State.m_ip -= 2;
-		return;
-	}
-
-	if (no == 0x16) {
-		uint16_t ah = (m_State.m_ax & 0xff00) >> 8;
-		switch(ah) {
-			case 1: // check for key
-				cpu::SetFlag<cpu::flag::ZF>(m_State.m_flags, true);
-				break;
-			default:
-				spdlog::error("HandleInterrupt {} func {}", no, ah);
-		}
-		return;
-	}
-#endif
+    const auto vectorAddress = MakeAddr(0, no * 4);
+    m_State.m_ip = m_Memory.ReadWord(vectorAddress + 0);
+    m_State.m_cs = m_Memory.ReadWord(vectorAddress + 2);
 }
 
 /* vim:set ts=4 sw=4: */

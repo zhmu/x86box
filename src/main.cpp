@@ -1,26 +1,29 @@
 #include "cpux86.h"
-#include "dos.h"
 #include "hostio.h"
 #include "io.h"
 #include "memory.h"
 #include "keyboard.h"
-#include "vectors.h"
 #include "vga.h"
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <fstream>
+#include <iostream>
+#include <iomanip>
+
+#include "spdlog/spdlog.h"
 #include "spdlog/cfg/env.h"
+
+namespace {
 
 Memory memory;
 IO io;
-Vectors vectors(memory);
-CPUx86 x86cpu(memory, io, vectors);
+CPUx86 x86cpu(memory, io);
 HostIO hostio;
-DOS dos(x86cpu, memory, vectors);
-VGA vga(memory, hostio, vectors);
-Keyboard keyboard(memory, hostio, vectors);
+VGA vga(memory, io, hostio);
+Keyboard keyboard(memory, io, hostio);
 
-static bool load_to_memory(const char* fname, uint32_t base)
+bool load_to_memory(const char* fname, uint32_t base)
 {
     FILE* f = fopen(fname, "rb");
     if (f == NULL)
@@ -31,8 +34,9 @@ static bool load_to_memory(const char* fname, uint32_t base)
         unsigned int len = fread(buf, 1, sizeof(buf), f);
         if (len <= 0)
             break;
-        for (unsigned int n = 0; n < len; n++)
+        for (unsigned int n = 0; n < len; n++) {
             memory.WriteByte(base + n, buf[n]);
+        }
         base += len;
     }
 
@@ -40,42 +44,42 @@ static bool load_to_memory(const char* fname, uint32_t base)
     return true;
 }
 
+void load_bios(const char* fname)
+{
+    std::ifstream ifs(fname, std::ifstream::binary);
+    if (!ifs) throw std::runtime_error(std::string("cannot open '") + fname + "'");
+
+    ifs.seekg(0, std::ifstream::end);
+    auto length = ifs.tellg();
+    ifs.seekg(0);
+
+    const auto base = 0x100000 - length;
+    const auto ptr = memory.GetPointer(base, length);
+    if (!ptr) throw std::runtime_error("cannot obtain pointer to memory");
+    spdlog::info("Loading BIOS at address 0x{:x}", base);
+
+    ifs.read(static_cast<char*>(ptr), length);
+    if (!ifs || ifs.gcount() != length)
+        throw std::runtime_error("read error");
+}
+
+}
+
+// Use SPDLOG_LEVEL=debug for debugging
 int main(int argc, char** argv)
 {
     spdlog::cfg::load_env_levels();
 
     memory.Reset();
-    memory.AddPeripheral(0xa0000, 65535, vga);
-    memory.AddPeripheral(0xb0000, 65535, vga);
     io.Reset();
-    dos.Reset();
     x86cpu.Reset();
     vga.Reset();
     keyboard.Reset();
-
-    if (!load_to_memory("../images/snake.bin", 0x10100))
+    load_bios("../../images/bios.bin");
+    if (!load_to_memory("../../images/ide_xtl_padded.bin", 0xe8000))
         abort();
-    x86cpu.SetupForCOM(0x1000);
-
-    if (0) {
-        std::ifstream ifs("../images/maze.exe");
-        const auto err = dos.LoadEXE(ifs);
-        if (err != DOS::ErrorCode::Success) {
-            fprintf(stderr, "can't load exe: %u\n", err);
-            return 1;
-        }
-    }
     if (!hostio.Initialize())
         return 1;
-
-#if 0
-	for (int i = 0; i < 1000; i++) {
-		x86cpu.RunInstruction();
-		x86cpu.Dump();
-  }
-return 1;
-
-#endif
 
     unsigned int n = 0, m = 0;
     while (!hostio.Quitting()) {
@@ -85,11 +89,6 @@ return 1;
             vga.Update();
             hostio.Update();
             n = 0;
-        }
-
-        if (++m > 10000) {
-            memory.WriteWord(0x46c, memory.ReadWord(0x46c) + 1);
-            m = 0;
         }
     }
     hostio.Cleanup();

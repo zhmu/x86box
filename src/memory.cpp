@@ -7,7 +7,6 @@
 namespace
 {
     static const unsigned int memorySize = 1048576;
-    static const unsigned int m_StringSize = 256;
 }
 
 Memory::Memory() { m_Memory = std::make_unique<uint8_t[]>(memorySize); }

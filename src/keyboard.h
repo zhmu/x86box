@@ -2,30 +2,23 @@
 #define __KEYBOARD_H__
 
 #include "memory.h"
-#include "xcallablevector.h"
 
+class IO;
 class HostIO;
 class Vectors;
 
-class Keyboard : public XCallableVector
+class Keyboard
 {
   public:
-    Keyboard(Memory& memory, HostIO& hostio, Vectors& vectors);
+    Keyboard(Memory& memory, IO& io, HostIO& hostio);
     virtual ~Keyboard();
 
     virtual void Reset();
 
-    void InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState);
-
   protected:
-    //! \brief Host IO used
     HostIO& m_hostio;
-
-    //! \brief Vectors object
-    Vectors& m_vectors;
-
-    //! \brief Host memory
     Memory& m_memory;
+    IO& m_io;
 };
 
 #endif /* __KEYBOARD_H__ */

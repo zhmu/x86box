@@ -3,15 +3,15 @@
 
 #include <memory>
 #include "memory.h"
-#include "xcallablevector.h"
 
+class IO;
 class HostIO;
 class Vectors;
 
-class VGA : public XMemoryMapped, public XCallableVector
+class VGA : public XMemoryMapped
 {
   public:
-    VGA(Memory& memory, HostIO& hostio, Vectors& vectors);
+    VGA(Memory& memory, IO& io, HostIO& hostio);
     virtual ~VGA();
 
     virtual void Reset();
@@ -27,19 +27,12 @@ class VGA : public XMemoryMapped, public XCallableVector
     static constexpr inline unsigned int s_video_width = 640;
     static constexpr inline unsigned int s_video_height = 400;
 
-    void InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState);
-
   protected:
     std::unique_ptr<uint8_t[]> m_videomem;
 
-    //! \brief Host IO used
     HostIO& m_hostio;
-
-    //! \brief Vectors object
-    Vectors& m_vectors;
-
-    //! \brief Host memory
     Memory& m_memory;
+    IO& m_io;
 };
 
 #endif /* __VGA_H__ */

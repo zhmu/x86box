@@ -6,14 +6,13 @@
 
 class IO;
 class Memory;
-class Vectors;
 
 class CPUx86
 {
   public:
     typedef uint32_t addr_t;
 
-    CPUx86(Memory& oMemory, IO& oIO, Vectors& oVector);
+    CPUx86(Memory& oMemory, IO& oIO);
     ~CPUx86();
 
     /*! \brief Fetches and executes the next instruction
@@ -90,20 +89,11 @@ class CPUx86
     static const unsigned int INT_OVERFLOW = 4;
 
   private:
-    //! \brief Retrieves the next byte from cs:ip
     uint8_t GetNextOpcode();
 
-    //! \brief Memory we use
     Memory& m_Memory;
-
-    //! \brief IO space we use
     IO& m_IO;
-
-    //! \brief Current CPU state
     cpu::State m_State;
-
-    //! \brief Interrupt vectors in use
-    Vectors& m_Vectors;
 };
 
 #endif /* __CPUX86_H__ */

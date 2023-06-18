@@ -2,9 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "io.h"
 #include "hostio.h"
 #include "vgafont.h"
-#include "vectors.h"
 
 #include "spdlog/spdlog.h"
 
@@ -13,10 +13,13 @@ namespace
     static const unsigned int VideoMemorySize = 262144;
 }
 
-VGA::VGA(Memory& memory, HostIO& hostio, Vectors& vectors)
-    : m_memory(memory), m_hostio(hostio), m_vectors(vectors)
+VGA::VGA(Memory& memory, IO& io, HostIO& hostio)
+    : m_memory(memory), m_hostio(hostio), m_io(io)
 {
     m_videomem = std::make_unique<uint8_t[]>(VideoMemorySize);
+
+    memory.AddPeripheral(0xa0000, 65535, *this);
+    memory.AddPeripheral(0xb0000, 65535, *this);
 }
 
 VGA::~VGA() = default;
@@ -24,14 +27,6 @@ VGA::~VGA() = default;
 void VGA::Reset()
 {
     memset(m_videomem.get(), 0, VideoMemorySize);
-    m_vectors.Register(0x10, *this);
-
-    m_memory.WriteByte(CPUx86::MakeAddr(0x40, 0x49), 3);           // current video mode
-    m_memory.WriteWord(CPUx86::MakeAddr(0x40, 0x4a), 80);          // columns on screen
-    m_memory.WriteWord(CPUx86::MakeAddr(0x40, 0x4c), 80 * 25 * 2); // page size in bytes
-    m_memory.WriteWord(CPUx86::MakeAddr(0x40, 0x4e), 0);           // page start address
-    m_memory.WriteByte(CPUx86::MakeAddr(0x40, 0x62), 0);           // page number
-    m_memory.WriteWord(CPUx86::MakeAddr(0x40, 0x63), 0x3d4);       // crt base i/o port
 }
 
 uint8_t VGA::ReadByte(Memory::Address addr)
@@ -79,46 +74,4 @@ void VGA::Update()
                     m_hostio.putpixel(x * 8 + i, y * 8 + j, color);
                 }
         }
-}
-
-void VGA::InvokeVector(uint8_t no, CPUx86& oCPU, cpu::State& oState)
-{
-    const auto getAl = [&]() { return oState.m_ax & 0xff; };
-    const auto getBh = [&]() { return (oState.m_bx & 0xff00) >> 8; };
-
-    const uint8_t ah = (oState.m_ax & 0xff00) >> 8;
-    switch (ah) {
-        case 0x0f:
-            spdlog::info("vga: ah={:02x}: get current video mode", ah);
-            oState.m_ax = m_memory.ReadByte(CPUx86::MakeAddr(0x40, 0x49)) |
-                          m_memory.ReadByte(CPUx86::MakeAddr(0x40, 0x4a)) << 8;
-            oState.m_bx = (oState.m_bx & 0xff) | m_memory.ReadByte(CPUx86::MakeAddr(0x40, 0x62))
-                                                     << 8;
-            break;
-        case 0x08: {
-            const auto bh = getBh();
-            spdlog::info(
-                "vga: ah={:02x}: read character and attribute at cursor position, page={}", ah, bh);
-            oState.m_ax = 0x1e20;
-            break;
-        }
-        case 0x11: {
-            const auto al = getAl();
-            switch (al) {
-                case 0x30:
-                    spdlog::info("vga: ax={:04x}: get font information", oState.m_ax);
-                    oState.m_es = 0;
-                    oState.m_bp = 0;                           /* XXX */
-                    oState.m_cx = 0;                           // XXX
-                    oState.m_dx = (oState.m_dx & 0xff00) | 25; // XXX
-                    break;
-                default:
-                    spdlog::info("vga: unknown function ax={:04x}", oState.m_ax);
-            }
-            break;
-        }
-        default: /* what's this? */
-            spdlog::info("vga: unknown function ah={:2x}", ah);
-            break;
-    }
 }
