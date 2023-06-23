@@ -44,6 +44,8 @@ class CPUx86
 
     static addr_t MakeAddr(uint16_t seg, uint16_t off);
 
+    void HandleInterrupt(uint8_t no);
+
   protected:
     void Push16(uint16_t value);
     uint16_t Pop16();
@@ -72,7 +74,6 @@ class CPUx86
 
     void Handle0FPrefix();
 
-    void HandleInterrupt(uint8_t no);
     void SignalInterrupt(uint8_t no);
 
     // These must be in sync with the x86 segment values (Sw)

@@ -3,10 +3,22 @@
 #include <assert.h>
 #include "vga.h"
 
-bool HostIO::Initialize()
+struct HostIO::Impl
+{
+    Impl();
+    ~Impl();
+
+    std::unique_ptr<uint32_t[]> frameBuffer;
+    SDL_Window* window{};
+    SDL_Renderer* renderer{};
+    SDL_Texture* texture{};
+    bool quitting = false;
+};
+
+HostIO::Impl::Impl()
 {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0)
-        return false;
+        std::abort();
 
     window = SDL_CreateWindow(
         "x86box", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
@@ -16,29 +28,34 @@ bool HostIO::Initialize()
             SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, VGA::s_video_width, VGA::s_video_height);
 
     frameBuffer = std::make_unique<uint32_t[]>(VGA::s_video_height * VGA::s_video_width);
-
-    return true;
 }
 
-void HostIO::Cleanup()
+HostIO::Impl::~Impl()
 {
     SDL_DestroyTexture(texture);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
-    SDL_Quit();
 }
+
+HostIO::HostIO()
+    : impl(std::make_unique<Impl>())
+{
+}
+
+HostIO::~HostIO() = default;
 
 void HostIO::Update()
 {
-    SDL_UpdateTexture(texture, nullptr, frameBuffer.get(), VGA::s_video_width * sizeof(uint32_t));
-    SDL_RenderCopy(renderer, texture, nullptr, nullptr);
-    SDL_RenderPresent(renderer);
+
+    SDL_UpdateTexture(impl->texture, nullptr, impl->frameBuffer.get(), VGA::s_video_width * sizeof(uint32_t));
+    SDL_RenderCopy(impl->renderer, impl->texture, nullptr, nullptr);
+    SDL_RenderPresent(impl->renderer);
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
             case SDL_QUIT:
-                m_quitting = true;
+                impl->quitting = true;
                 break;
 #if 0
 			case SDL_KEYDOWN:
@@ -57,6 +74,11 @@ void HostIO::putpixel(unsigned int x, unsigned int y, uint32_t c)
     if (x >= (unsigned int)VGA::s_video_width || y >= (unsigned int)VGA::s_video_height)
         return;
 
-    uint32_t* p = frameBuffer.get() + y * VGA::s_video_width + x;
+    auto p = impl->frameBuffer.get() + y * VGA::s_video_width + x;
     *p = c;
+}
+
+bool HostIO::IsQuitting() const
+{
+    return impl->quitting;
 }

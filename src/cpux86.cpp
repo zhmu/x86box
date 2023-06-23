@@ -1918,10 +1918,6 @@ uint16_t CPUx86::ReadEA16(const DecodeState& oState)
             Unreachable();
             break;
     }
-
-    spdlog::info("read(16) @ {:04x}:{:04x} -> {:x}",
-        seg_base, oState.m_off + oState.m_disp,
-        m_Memory.ReadWord(MakeAddr(seg_base, oState.m_off + oState.m_disp)));
     return m_Memory.ReadWord(MakeAddr(seg_base, oState.m_off + oState.m_disp));
 }
 
@@ -1950,8 +1946,6 @@ void CPUx86::WriteEA16(const DecodeState& oState, uint16_t value)
             Unreachable();
             break;
     }
-
-    spdlog::info("write(16) @ {:04x}:{:04x} value {:x}", seg_base, oState.m_off + oState.m_disp, value);
     m_Memory.WriteWord(MakeAddr(seg_base, oState.m_off + oState.m_disp), value);
 }
 
@@ -1980,8 +1974,6 @@ uint8_t CPUx86::ReadEA8(const DecodeState& oState)
         default:
             Unreachable();
     }
-
-    spdlog::info("read(8) @ {:04x}:{:04x}", seg_base, oState.m_off + oState.m_disp);
     return m_Memory.ReadByte(MakeAddr(seg_base, oState.m_off + oState.m_disp));
 }
 
@@ -2011,8 +2003,6 @@ void CPUx86::WriteEA8(const DecodeState& oState, uint8_t val)
         default:
             Unreachable();
     }
-
-    spdlog::info("write(8) @ {:04x}:{:04x} value {:x}", seg_base, oState.m_off + oState.m_disp, val);
     m_Memory.WriteByte(MakeAddr(seg_base, oState.m_off + oState.m_disp), val);
 }
 

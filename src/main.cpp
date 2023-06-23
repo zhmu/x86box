@@ -4,6 +4,9 @@
 #include "memory.h"
 #include "keyboard.h"
 #include "vga.h"
+#include "ata.h"
+#include "pic.h"
+#include "pit.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -16,14 +19,8 @@
 
 namespace {
 
-Memory memory;
-IO io;
-CPUx86 x86cpu(memory, io);
-HostIO hostio;
-VGA vga(memory, io, hostio);
-Keyboard keyboard(memory, io, hostio);
 
-bool load_to_memory(const char* fname, uint32_t base)
+bool load_to_memory(Memory& memory, const char* fname, uint32_t base)
 {
     FILE* f = fopen(fname, "rb");
     if (f == NULL)
@@ -44,7 +41,7 @@ bool load_to_memory(const char* fname, uint32_t base)
     return true;
 }
 
-void load_bios(const char* fname)
+void load_bios(Memory& memory, const char* fname)
 {
     std::ifstream ifs(fname, std::ifstream::binary);
     if (!ifs) throw std::runtime_error(std::string("cannot open '") + fname + "'");
@@ -70,27 +67,49 @@ int main(int argc, char** argv)
 {
     spdlog::cfg::load_env_levels();
 
-    memory.Reset();
-    io.Reset();
-    x86cpu.Reset();
-    vga.Reset();
-    keyboard.Reset();
-    load_bios("../../images/bios.bin");
-    if (!load_to_memory("../../images/ide_xtl_padded.bin", 0xe8000))
+    auto memory = std::make_unique<Memory>();
+    auto io = std::make_unique<IO>();
+    auto x86cpu = std::make_unique<CPUx86>(*memory, *io);
+    auto hostio = std::make_unique<HostIO>();
+    auto ata = std::make_unique<ATA>(*io);
+    auto pic = std::make_unique<PIC>(*io);
+    auto pit = std::make_unique<PIT>(*io);
+    auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
+    auto keyboard = std::make_unique<Keyboard>(*memory, *io, *hostio);
+
+    memory->Reset();
+    io->Reset();
+    x86cpu->Reset();
+    vga->Reset();
+    keyboard->Reset();
+    ata->Reset();
+    pic->Reset();
+    pit->Reset();
+    load_bios(*memory, "../../images/bios.bin");
+    if (!load_to_memory(*memory, "../../images/ide_xtl_padded.bin", 0xe8000))
         abort();
-    if (!hostio.Initialize())
-        return 1;
 
     unsigned int n = 0, m = 0;
-    while (!hostio.Quitting()) {
-        x86cpu.RunInstruction();
-        x86cpu.Dump();
+    while (!hostio->IsQuitting()) {
+        if (x86cpu->GetState().m_flags & cpu::flag::IF) {
+            auto irq = pic->DequeuePendingIRQ();
+            if (irq) {
+                spdlog::info("main: triggering irq {}", *irq);
+                x86cpu->HandleInterrupt(*irq);
+            }
+        }
+
+        x86cpu->RunInstruction();
+        x86cpu->Dump();
         if (++n >= 500) {
-            vga.Update();
-            hostio.Update();
+            vga->Update();
+            hostio->Update();
             n = 0;
         }
+
+        if (pit->Tick()) {
+            pic->AssertIRQ(0);
+        }
     }
-    hostio.Cleanup();
     return 0;
 }
