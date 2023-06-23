@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "disassembler.h"
+
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -76,6 +78,9 @@ int main(int argc, char** argv)
     auto pit = std::make_unique<PIT>(*io);
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
     auto keyboard = std::make_unique<Keyboard>(*memory, *io, *hostio);
+    std::unique_ptr<Disassembler> disassembler;
+    if (true)
+        disassembler = std::make_unique<Disassembler>();
 
     memory->Reset();
     io->Reset();
@@ -97,6 +102,11 @@ int main(int argc, char** argv)
                 spdlog::info("main: triggering irq {}", *irq);
                 x86cpu->HandleInterrupt(*irq);
             }
+        }
+
+        if (disassembler) {
+            const auto s = disassembler->Disassemble(*memory, x86cpu->GetState());
+            std::cout << s << '\n';
         }
 
         x86cpu->RunInstruction();
