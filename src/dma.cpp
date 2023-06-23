@@ -81,6 +81,8 @@ DMA::DMA(IO& io)
     io.AddPeripheral(io::Base, 10, *impl);
 }
 
+DMA::~DMA() = default;
+
 void DMA::Reset()
 {
 }
