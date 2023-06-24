@@ -99,7 +99,7 @@ void DMA::Impl::Out16(io_port port, uint16_t val)
 
 uint8_t DMA::Impl::In8(io_port port)
 {
-    spdlog::info("dma: in16({:x})", port);
+    spdlog::info("dma: in8({:x})", port);
     return 0;
 }
 

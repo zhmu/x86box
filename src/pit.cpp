@@ -92,8 +92,8 @@ void PIT::Reset()
         // Only signal IRQ0 if the output from channel 0 changes
         if (ch_num == 0 && impl->channel[ch_num].prev_output != output) {
             signal_irq = output;
-            impl->channel[ch_num].prev_output = output;
         }
+        impl->channel[ch_num].prev_output = output;
     }
 
     return signal_irq;
@@ -239,4 +239,9 @@ bool PIT::Impl::TickChannel(size_t ch_num)
         
     ch.prev_mode = ch.mode;
     return output;
+}
+
+bool PIT::GetTimer2Output() const
+{
+    return impl->channel[2].prev_output;
 }

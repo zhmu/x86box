@@ -8,6 +8,7 @@
 #include "pic.h"
 #include "pit.h"
 #include "dma.h"
+#include "ppi.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -78,6 +79,7 @@ int main(int argc, char** argv)
     auto pic = std::make_unique<PIC>(*io);
     auto pit = std::make_unique<PIT>(*io);
     auto dma = std::make_unique<DMA>(*io);
+    auto ppi = std::make_unique<PPI>(*io, *pit);
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
     auto keyboard = std::make_unique<Keyboard>(*memory, *io, *hostio);
     std::unique_ptr<Disassembler> disassembler;
