@@ -9,8 +9,6 @@
 #include "pit.h"
 #include "dma.h"
 #include "ppi.h"
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "disassembler.h"
 
@@ -24,29 +22,8 @@
 
 namespace {
 
-
-bool load_to_memory(Memory& memory, const std::string& fname, uint32_t base)
-{
-    FILE* f = fopen(fname.c_str(), "rb");
-    if (f == NULL)
-        return false;
-
-    while (true) {
-        char buf[1024];
-        unsigned int len = fread(buf, 1, sizeof(buf), f);
-        if (len <= 0)
-            break;
-        for (unsigned int n = 0; n < len; n++) {
-            memory.WriteByte(base + n, buf[n]);
-        }
-        base += len;
-    }
-
-    fclose(f);
-    return true;
-}
-
-void load_bios(Memory& memory, const std::string& fname)
+template<typename Fn>
+void load_rom(Memory& memory, const std::string& fname, Fn determineBaseAddr)
 {
     std::ifstream ifs(fname, std::ifstream::binary);
     if (!ifs) throw std::runtime_error(std::string("cannot open '") + fname + "'");
@@ -55,7 +32,7 @@ void load_bios(Memory& memory, const std::string& fname)
     auto length = ifs.tellg();
     ifs.seekg(0);
 
-    const auto base = 0x100000 - length;
+    const auto base = determineBaseAddr(length);
     const auto ptr = memory.GetPointer(base, length);
     if (!ptr) throw std::runtime_error("cannot obtain pointer to memory");
     spdlog::info("Loading BIOS at address 0x{:x}", base);
@@ -115,11 +92,11 @@ int main(int argc, char** argv)
     pic->Reset();
     pit->Reset();
     dma->Reset();
-    load_bios(*memory, prog.get<std::string>("bios"));
+
+    load_rom(*memory, prog.get<std::string>("bios"), [](size_t length) { return 0x100000 - length; });
     if (auto rom = prog.present("--rom"); rom) {
         //"../../images/ide_xtl_padded.bin"
-        if (!load_to_memory(*memory, *rom, 0xe8000))
-            abort();
+        load_rom(*memory, *rom, [](size_t length) { return 0xe8000; });
     }
 
     unsigned int n = 0, m = 0;
