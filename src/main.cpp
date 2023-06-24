@@ -9,6 +9,7 @@
 #include "pit.h"
 #include "dma.h"
 #include "ppi.h"
+#include "rtc.h"
 
 #include "disassembler.h"
 
@@ -77,6 +78,7 @@ int main(int argc, char** argv)
     auto pit = std::make_unique<PIT>(*io);
     auto dma = std::make_unique<DMA>(*io);
     auto ppi = std::make_unique<PPI>(*io, *pit);
+    auto rtc = std::make_unique<RTC>(*io);
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
     auto keyboard = std::make_unique<Keyboard>(*io, *hostio);
     std::unique_ptr<Disassembler> disassembler;
@@ -92,6 +94,7 @@ int main(int argc, char** argv)
     pic->Reset();
     pit->Reset();
     dma->Reset();
+    rtc->Reset();
 
     load_rom(*memory, prog.get<std::string>("bios"), [](size_t length) { return 0x100000 - length; });
     if (auto rom = prog.present("--rom"); rom) {
