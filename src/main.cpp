@@ -81,7 +81,7 @@ int main(int argc, char** argv)
     auto dma = std::make_unique<DMA>(*io);
     auto ppi = std::make_unique<PPI>(*io, *pit);
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
-    auto keyboard = std::make_unique<Keyboard>(*memory, *io, *hostio);
+    auto keyboard = std::make_unique<Keyboard>(*io, *hostio);
     std::unique_ptr<Disassembler> disassembler;
     if (true)
         disassembler = std::make_unique<Disassembler>();

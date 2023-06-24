@@ -1,24 +1,21 @@
 #ifndef __KEYBOARD_H__
 #define __KEYBOARD_H__
 
-#include "memory.h"
+#include <memory>
 
-class IO;
 class HostIO;
-class Vectors;
+class IO;
 
-class Keyboard
+class Keyboard final
 {
-  public:
-    Keyboard(Memory& memory, IO& io, HostIO& hostio);
-    virtual ~Keyboard();
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+
+public:
+    Keyboard(IO& io, HostIO& hostio);
+    ~Keyboard();
 
     virtual void Reset();
-
-  protected:
-    HostIO& m_hostio;
-    Memory& m_memory;
-    IO& m_io;
 };
 
 #endif /* __KEYBOARD_H__ */
