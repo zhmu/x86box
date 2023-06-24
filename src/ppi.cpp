@@ -92,7 +92,6 @@ uint8_t PPI::Impl::In8(io_port port)
             if (pit.GetTimer2Output()) {
                 value |= 1;
             }
-            spdlog::error("ppi: reading control {:x}", value);
             return value;
         }
         case io::Switch: {
@@ -102,7 +101,6 @@ uint8_t PPI::Impl::In8(io_port port)
                 hiNibble |= switch_reg::Timer2Output_1;
                 hiNibble |= switch_reg::Timer2Output_2;
             }
-            spdlog::error("ppi: reading switch hi {:x}", hiNibble);
 
             uint8_t loNibble;
             if (selectedSwitchReg == 0) /* Switch Select = 0 */ {
