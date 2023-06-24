@@ -18,15 +18,16 @@
 #include <iostream>
 #include <iomanip>
 
+#include "argparse/argparse.hpp"
 #include "spdlog/spdlog.h"
 #include "spdlog/cfg/env.h"
 
 namespace {
 
 
-bool load_to_memory(Memory& memory, const char* fname, uint32_t base)
+bool load_to_memory(Memory& memory, const std::string& fname, uint32_t base)
 {
-    FILE* f = fopen(fname, "rb");
+    FILE* f = fopen(fname.c_str(), "rb");
     if (f == NULL)
         return false;
 
@@ -45,7 +46,7 @@ bool load_to_memory(Memory& memory, const char* fname, uint32_t base)
     return true;
 }
 
-void load_bios(Memory& memory, const char* fname)
+void load_bios(Memory& memory, const std::string& fname)
 {
     std::ifstream ifs(fname, std::ifstream::binary);
     if (!ifs) throw std::runtime_error(std::string("cannot open '") + fname + "'");
@@ -69,6 +70,25 @@ void load_bios(Memory& memory, const char* fname)
 // Use SPDLOG_LEVEL=debug for debugging
 int main(int argc, char** argv)
 {
+    argparse::ArgumentParser prog("x86box");
+    prog.add_argument("--bios")
+        .help("use specific bios image")
+        .default_value(std::string("../../images/bios.bin"))
+        .required();
+    prog.add_argument("--rom")
+        .help("use option rom");
+    prog.add_argument("-d", "--disassemble")
+        .help("enable live disassembly of code prior to execution")
+        .default_value(false)
+        .implicit_value(true);
+    try {
+        prog.parse_args(argc, argv);
+    } catch(const std::runtime_error& e) {
+        std::cerr << e.what() << '\n';
+        std::cerr << prog;
+        return 1;
+    }
+
     spdlog::cfg::load_env_levels();
 
     auto memory = std::make_unique<Memory>();
@@ -83,7 +103,7 @@ int main(int argc, char** argv)
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
     auto keyboard = std::make_unique<Keyboard>(*io, *hostio);
     std::unique_ptr<Disassembler> disassembler;
-    if (true)
+    if (prog["disassemble"] == true)
         disassembler = std::make_unique<Disassembler>();
 
     memory->Reset();
@@ -95,9 +115,12 @@ int main(int argc, char** argv)
     pic->Reset();
     pit->Reset();
     dma->Reset();
-    load_bios(*memory, "../../images/bios.bin");
-    if (!load_to_memory(*memory, "../../images/ide_xtl_padded.bin", 0xe8000))
-        abort();
+    load_bios(*memory, prog.get<std::string>("bios"));
+    if (auto rom = prog.present("--rom"); rom) {
+        //"../../images/ide_xtl_padded.bin"
+        if (!load_to_memory(*memory, *rom, 0xe8000))
+            abort();
+    }
 
     unsigned int n = 0, m = 0;
     while (!hostio->IsQuitting()) {

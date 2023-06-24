@@ -4,7 +4,7 @@ target_link_libraries(x86box PRIVATE ${SDL2_LIBRARIES})
 target_sources(x86box PRIVATE hostio.cpp)
 target_sources(x86box PRIVATE disassembler.cpp)
 
-target_link_libraries(x86box PRIVATE spdlog::spdlog)
+target_link_libraries(x86box PRIVATE spdlog::spdlog argparse)
 target_link_libraries(x86box PRIVATE capstone)
 
 add_custom_command(
