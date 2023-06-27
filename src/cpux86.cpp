@@ -1830,7 +1830,7 @@ void CPUx86::DecodeEA(uint8_t modrm, DecodeState& oState)
         }
         case 1: /* DISP=disp-low sign-extended to 16-bits, disp-hi absent */ {
             const auto imm = getImm8();
-            oState.m_disp = (addr_t)((int16_t)imm);
+            oState.m_disp = ExtendSign8To16(imm);
             break;
         }
         case 2: /* DISP=disp-hi:disp-lo */ {
