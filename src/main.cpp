@@ -10,6 +10,7 @@
 #include "dma.h"
 #include "ppi.h"
 #include "rtc.h"
+#include "fdc.h"
 
 #include "disassembler.h"
 
@@ -76,9 +77,10 @@ int main(int argc, char** argv)
     auto ata = std::make_unique<ATA>(*io);
     auto pic = std::make_unique<PIC>(*io);
     auto pit = std::make_unique<PIT>(*io);
-    auto dma = std::make_unique<DMA>(*io);
+    auto dma = std::make_unique<DMA>(*io, *memory);
     auto ppi = std::make_unique<PPI>(*io, *pit);
     auto rtc = std::make_unique<RTC>(*io);
+    auto fdc = std::make_unique<FDC>(*io, *pic, *dma);
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
     auto keyboard = std::make_unique<Keyboard>(*io, *hostio);
     std::unique_ptr<Disassembler> disassembler;
@@ -95,6 +97,7 @@ int main(int argc, char** argv)
     pit->Reset();
     dma->Reset();
     rtc->Reset();
+    fdc->Reset();
 
     load_rom(*memory, prog.get<std::string>("bios"), [](size_t length) { return 0x100000 - length; });
     if (auto rom = prog.present("--rom"); rom) {
@@ -103,6 +106,7 @@ int main(int argc, char** argv)
     }
 
     unsigned int n = 0, m = 0;
+    bool disassembler_active = false;
     while (!hostio->IsQuitting()) {
         if (x86cpu->GetState().m_flags & cpu::flag::IF) {
             auto irq = pic->DequeuePendingIRQ();
@@ -112,13 +116,16 @@ int main(int argc, char** argv)
             }
         }
 
-        if (disassembler) {
+        if (x86cpu->GetState().m_cs == 0 && x86cpu->GetState().m_ip == 0x7c00)
+            disassembler_active = true;
+
+        if (disassembler && disassembler_active) {
             const auto s = disassembler->Disassemble(*memory, x86cpu->GetState());
             std::cout << s << '\n';
         }
 
         x86cpu->RunInstruction();
-        x86cpu->Dump();
+        if (disassembler_active) x86cpu->Dump();
         if (++n >= 500) {
             vga->Update();
             hostio->Update();

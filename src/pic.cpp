@@ -106,7 +106,7 @@ void PIC::Impl::Out8(io_port port, uint8_t val)
                 if (val & ocw2::EOI) {
                     auto irq = std::countr_zero(isr);
                     spdlog::info("pic: eoi, current active irq {}", irq);
-                    isr = ~(1 << irq);
+                    isr &= ~(1 << irq);
                 }
             }
             break;
@@ -166,6 +166,7 @@ void PIC::Impl::AssertIRQ(int num)
 {
     assert(num >= 0 && num < 7);
     irr |= (1 << num);
+    spdlog::info("pic: assertIrq {:x} -> irr {:x}", num, irr);
 }
  
  std::optional<int> PIC::Impl::DequeuePendingIRQ()
