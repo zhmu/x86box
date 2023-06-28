@@ -927,17 +927,14 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x98: /* CBW */ {
-            if (m_State.m_ax & 0x80)
-                m_State.m_ax = 0xff80 | m_State.m_ax & 0x7f;
-            else
-                m_State.m_ax = m_State.m_ax & 0x7f;
+            m_State.m_ax = ExtendSign8To16(m_State.m_ax & 0xff);
             break;
         }
         case 0x99: /* CWD */ {
             if (m_State.m_ax & 0x8000)
                 m_State.m_dx = 0xffff;
             else
-                m_State.m_dx = 0xffff;
+                m_State.m_dx = 0;
             break;
         }
         case 0x9a: /* CALL Ap */ {
