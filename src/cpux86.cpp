@@ -270,15 +270,28 @@ namespace
         memory.WriteWord(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp), value);
     }
 
-}
-
-namespace
-{
-    template<typename Fn>
-    uint16_t GetImm16(Fn getImm8)
+    void Push16(Memory& memory, cpu::State& state, const uint16_t value)
     {
-        uint16_t a = getImm8();
-        uint16_t b = getImm8();
+        memory.WriteWord(CPUx86::MakeAddr(state.m_ss, state.m_sp - 2), value);
+        state.m_sp -= 2;
+    }
+
+    uint16_t Pop16(Memory& memory, cpu::State& state)
+    {
+        const auto value = memory.ReadWord(CPUx86::MakeAddr(state.m_ss, state.m_sp));
+        state.m_sp += 2;
+        return value;
+    }
+
+    uint8_t GetCodeImm8(Memory& memory, cpu::State& state)
+    {
+        return memory.ReadByte(CPUx86::MakeAddr(state.m_cs, state.m_ip++));
+    }
+
+    uint16_t GetCodeImm16(Memory& memory, cpu::State& state)
+    {
+        const uint16_t a = GetCodeImm8(memory, state);
+        const uint16_t b = GetCodeImm8(memory, state);
         return a | (b << 8);
     }
 
@@ -292,9 +305,9 @@ namespace
 
 void CPUx86::RunInstruction()
 {
-    auto getImm8 = [&]() { return GetNextOpcode(); };
-    auto getModRm = [&]() { return GetNextOpcode(); };
-    auto getImm16 = [&]() { return GetImm16(getImm8); };
+    auto getImm8 = [&]() { return GetCodeImm8(m_Memory, m_State); };
+    auto getModRm = [&]() { return GetCodeImm8(m_Memory, m_State); };
+    auto getImm16 = [&]() { return GetCodeImm16(m_Memory, m_State); };
 
     auto handleConditionalJump = [&](bool take) {
         const auto imm = getImm8();
@@ -353,7 +366,7 @@ void CPUx86::RunInstruction()
         SetReg8(reg, shift, op(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_Memory, m_State, decodeState)));
     };
 
-    auto opcode = GetNextOpcode();
+    auto opcode = GetCodeImm8(m_Memory, m_State);
     spdlog::debug("cs:ip={:04x}:{:04x} opcode {:02x}", m_State.m_cs, m_State.m_ip - 1, opcode);
 
     // Handle prefixes first
@@ -379,7 +392,7 @@ void CPUx86::RunInstruction()
         } else {
             break;
         }
-        opcode = GetNextOpcode();
+        opcode = GetCodeImm8(m_Memory, m_State);
     }
 
     switch (opcode) {
@@ -410,11 +423,11 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x06: /* PUSH ES */ {
-            Push16(m_State.m_es);
+            Push16(m_Memory, m_State, m_State.m_es);
             break;
         }
         case 0x07: /* POP ES */ {
-            m_State.m_es = Pop16();
+            m_State.m_es = Pop16(m_Memory, m_State);
             break;
         }
         case 0x08: /* OR Eb Gb */ {
@@ -444,7 +457,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x0e: /* PUSH CS */ {
-            Push16(m_State.m_cs);
+            Push16(m_Memory, m_State, m_State.m_cs);
             break;
         }
         case 0x0f: /* -- */ {
@@ -478,11 +491,11 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x16: /* PUSH SS */ {
-            Push16(m_State.m_ss);
+            Push16(m_Memory, m_State, m_State.m_ss);
             break;
         }
         case 0x17: /* POP SS */ {
-            m_State.m_ss = Pop16();
+            m_State.m_ss = Pop16(m_Memory, m_State);
             break;
         }
         case 0x18: /* SBB Eb Gb */ {
@@ -512,11 +525,11 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x1e: /* PUSH DS */ {
-            Push16(m_State.m_ds);
+            Push16(m_Memory, m_State, m_State.m_ds);
             break;
         }
         case 0x1f: /* POP DS */ {
-            m_State.m_ds = Pop16();
+            m_State.m_ds = Pop16(m_Memory, m_State);
             break;
         }
         case 0x20: /* AND Eb Gb */ {
@@ -732,67 +745,67 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x50: /* PUSH eAX */ {
-            Push16(m_State.m_ax);
+            Push16(m_Memory, m_State, m_State.m_ax);
             break;
         }
         case 0x51: /* PUSH eCX */ {
-            Push16(m_State.m_cx);
+            Push16(m_Memory, m_State, m_State.m_cx);
             break;
         }
         case 0x52: /* PUSH eDX */ {
-            Push16(m_State.m_dx);
+            Push16(m_Memory, m_State, m_State.m_dx);
             break;
         }
         case 0x53: /* PUSH eBX */ {
-            Push16(m_State.m_bx);
+            Push16(m_Memory, m_State, m_State.m_bx);
             break;
         }
         case 0x54: /* PUSH eSP */ {
-            Push16(m_State.m_sp);
+            Push16(m_Memory, m_State, m_State.m_sp);
             break;
         }
         case 0x55: /* PUSH eBP */ {
-            Push16(m_State.m_bp);
+            Push16(m_Memory, m_State, m_State.m_bp);
             break;
         }
         case 0x56: /* PUSH eSI */ {
-            Push16(m_State.m_si);
+            Push16(m_Memory, m_State, m_State.m_si);
             break;
         }
         case 0x57: /* PUSH eDI */ {
-            Push16(m_State.m_di);
+            Push16(m_Memory, m_State, m_State.m_di);
             break;
         }
         case 0x58: /* POP eAX */ {
-            m_State.m_ax = Pop16();
+            m_State.m_ax = Pop16(m_Memory, m_State);
             break;
         }
         case 0x59: /* POP eCX */ {
-            m_State.m_cx = Pop16();
+            m_State.m_cx = Pop16(m_Memory, m_State);
             break;
         }
         case 0x5a: /* POP eDX */ {
-            m_State.m_dx = Pop16();
+            m_State.m_dx = Pop16(m_Memory, m_State);
             break;
         }
         case 0x5b: /* POP eBX */ {
-            m_State.m_bx = Pop16();
+            m_State.m_bx = Pop16(m_Memory, m_State);
             break;
         }
         case 0x5c: /* POP eSP */ {
-            m_State.m_sp = Pop16();
+            m_State.m_sp = Pop16(m_Memory, m_State);
             break;
         }
         case 0x5d: /* POP eBP */ {
-            m_State.m_bp = Pop16();
+            m_State.m_bp = Pop16(m_Memory, m_State);
             break;
         }
         case 0x5e: /* POP eSI */ {
-            m_State.m_si = Pop16();
+            m_State.m_si = Pop16(m_Memory, m_State);
             break;
         }
         case 0x5f: /* POP eDI */ {
-            m_State.m_di = Pop16();
+            m_State.m_di = Pop16(m_Memory, m_State);
             break;
         }
         case 0x60: /* -- */ {
@@ -829,7 +842,7 @@ void CPUx86::RunInstruction()
         }
         case 0x68: /* PUSH imm16 */ {
             const auto imm = getImm16();
-            Push16(imm);
+            Push16(m_Memory, m_State, imm);
             break;
         }
         case 0x69: /* -- */ {
@@ -840,7 +853,7 @@ void CPUx86::RunInstruction()
             const auto imm = getImm8();
             int16_t imm16 = (int16_t)imm;
             // TODO
-            Push16(imm16);
+            Push16(m_Memory, m_State, imm16);
             break;
         }
         case 0x6b: /* -- */ {
@@ -1115,7 +1128,7 @@ void CPUx86::RunInstruction()
         case 0x8f: /* POP Ev */ {
             const auto modrm = getModRm();
             const auto decodeState = DecodeEA(modrm);
-            WriteEA16(m_Memory, m_State, decodeState, Pop16());
+            WriteEA16(m_Memory, m_State, decodeState, Pop16(m_Memory, m_State));
             break;
         }
         case 0x90: /* XCHG eAX eAX (NOP) */
@@ -1146,8 +1159,8 @@ void CPUx86::RunInstruction()
         case 0x9a: /* 0ALL Ap */ {
             const auto ip = getImm16();
             const auto cs = getImm16();
-            Push16(m_State.m_cs);
-            Push16(m_State.m_ip);
+            Push16(m_Memory, m_State, m_State.m_cs);
+            Push16(m_Memory, m_State, m_State.m_ip);
             m_State.m_cs = cs;
             m_State.m_ip = ip;
             break;
@@ -1157,11 +1170,11 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x9c: /* PUSHF */ {
-            Push16(m_State.m_flags | cpu::flag::ON);
+            Push16(m_Memory, m_State, m_State.m_flags | cpu::flag::ON);
             break;
         }
         case 0x9d: /* POPF */ {
-            m_State.m_flags = Pop16() | cpu::flag::ON;
+            m_State.m_flags = Pop16(m_Memory, m_State) | cpu::flag::ON;
             break;
         }
         case 0x9e: /* SAHF */ {
@@ -1478,12 +1491,12 @@ void CPUx86::RunInstruction()
         }
         case 0xc2: /* RET Iw */ {
             const auto imm = getImm16();
-            m_State.m_ip = Pop16();
+            m_State.m_ip = Pop16(m_Memory, m_State);
             m_State.m_sp += imm;
             break;
         }
         case 0xc3: /* RET */ {
-            m_State.m_ip = Pop16();
+            m_State.m_ip = Pop16(m_Memory, m_State);
             break;
         }
         case 0xc4: /* LES Gv Mp */
@@ -1526,14 +1539,14 @@ void CPUx86::RunInstruction()
         }
         case 0xca: /* RETF Iw */ {
             const auto imm = getImm16();
-            m_State.m_ip = Pop16();
-            m_State.m_cs = Pop16();
+            m_State.m_ip = Pop16(m_Memory, m_State);
+            m_State.m_cs = Pop16(m_Memory, m_State);
             m_State.m_sp += imm;
             break;
         }
         case 0xcb: /* RETF */ {
-            m_State.m_ip = Pop16();
-            m_State.m_cs = Pop16();
+            m_State.m_ip = Pop16(m_Memory, m_State);
+            m_State.m_cs = Pop16(m_Memory, m_State);
             break;
         }
         case 0xcc: /* INT 3 */ {
@@ -1551,9 +1564,9 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xcf: /* IRET */ {
-            m_State.m_ip = Pop16();
-            m_State.m_cs = Pop16();
-            m_State.m_flags = Pop16();
+            m_State.m_ip = Pop16(m_Memory, m_State);
+            m_State.m_cs = Pop16(m_Memory, m_State);
+            m_State.m_flags = Pop16(m_Memory, m_State);
             break;
         }
         case 0xd0: /* GRP2 Eb 1 */ {
@@ -1776,7 +1789,7 @@ void CPUx86::RunInstruction()
         }
         case 0xe8: /* CALL Jv */ {
             const auto imm = getImm16();
-            Push16(m_State.m_ip);
+            Push16(m_Memory, m_State, m_State.m_ip);
             RelativeJump16(m_State.m_ip, imm);
             break;
         }
@@ -1964,12 +1977,12 @@ void CPUx86::RunInstruction()
                     WriteEA16(m_Memory, m_State, decodeState, alu::DEC<16>(m_State.m_flags, val));
                     break;
                 case 2: /* CALL Ev */
-                    Push16(m_State.m_ip);
+                    Push16(m_Memory, m_State, m_State.m_ip);
                     m_State.m_ip = val;
                     break;
                 case 3: /* CALL Ep */ {
-                    Push16(m_State.m_cs);
-                    Push16(m_State.m_ip);
+                    Push16(m_Memory, m_State, m_State.m_cs);
+                    Push16(m_Memory, m_State, m_State.m_ip);
                     m_State.m_ip = val;
                     m_State.m_cs = ReadEA16(m_Memory, m_State, decodeState, 2);
                     break;
@@ -1983,7 +1996,7 @@ void CPUx86::RunInstruction()
                     break;
                 }
                 case 6: /* PUSH Ev */
-                    Push16(val);
+                    Push16(m_Memory, m_State, val);
                     break;
                 case 7: /* undefined */
                     invalidOpcode();
@@ -1994,11 +2007,6 @@ void CPUx86::RunInstruction()
     }
 }
 
-uint8_t CPUx86::GetNextOpcode()
-{
-    return m_Memory.ReadByte(MakeAddr(m_State.m_cs, m_State.m_ip++));
-}
-
 CPUx86::addr_t CPUx86::MakeAddr(uint16_t seg, uint16_t off)
 {
     return ((addr_t)seg << 4) + (addr_t)off;
@@ -2006,8 +2014,8 @@ CPUx86::addr_t CPUx86::MakeAddr(uint16_t seg, uint16_t off)
 
 DecodeState CPUx86::DecodeEA(uint8_t modrm)
 {
-    auto getImm8 = [&]() { return GetNextOpcode(); };
-    auto getImm16 = [&]() { return GetImm16(getImm8); };
+    auto getImm8 = [&]() { return GetCodeImm8(m_Memory, m_State); };
+    auto getImm16 = [&]() { return GetCodeImm16(m_Memory, m_State); };
 
     const uint8_t mod = (modrm & 0xc0) >> 6;
     const uint8_t rm = modrm & 7;
@@ -2088,19 +2096,6 @@ DecodeState CPUx86::DecodeEA(uint8_t modrm)
     return oState;
 }
 
-void CPUx86::Push16(uint16_t value)
-{
-    m_Memory.WriteWord(MakeAddr(m_State.m_ss, m_State.m_sp - 2), value);
-    m_State.m_sp -= 2;
-}
-
-uint16_t CPUx86::Pop16()
-{
-    uint16_t value = m_Memory.ReadWord(MakeAddr(m_State.m_ss, m_State.m_sp));
-    m_State.m_sp += 2;
-    return value;
-}
-
 namespace cpu
 {
 
@@ -2125,9 +2120,9 @@ void CPUx86::SignalInterrupt(uint8_t no)
 void CPUx86::HandleInterrupt(uint8_t no)
 {
     // Push flags and return address
-    Push16(m_State.m_flags);
-    Push16(m_State.m_cs);
-    Push16(m_State.m_ip);
+    Push16(m_Memory, m_State, m_State.m_flags);
+    Push16(m_Memory, m_State, m_State.m_cs);
+    Push16(m_Memory, m_State, m_State.m_ip);
 
     // Transfer control to interrupt
     const auto vectorAddress = MakeAddr(0, no * 4);
