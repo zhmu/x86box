@@ -8,8 +8,6 @@
 class IO;
 class Memory;
 
-struct DecodeState;
-
 class CPUx86
 {
   public:
@@ -35,9 +33,6 @@ class CPUx86
     void HandleInterrupt(uint8_t no);
 
   private:
-
-    DecodeState DecodeEA(uint8_t modrm);
-
     void SignalInterrupt(uint8_t no);
 
     Memory& m_Memory;
