@@ -33,6 +33,12 @@ namespace alu = cpu::alu;
 
 namespace
 {
+    // These must be in sync with the x86 segment values (Sw)
+    constexpr int SEG_ES = 0;
+    constexpr int SEG_CS = 1;
+    constexpr int SEG_SS = 2;
+    constexpr int SEG_DS = 3;
+
     auto ModRm_XXX(const uint8_t modRm) { return (modRm >> 3) & 7; }
 
     constexpr void RelativeJump8(uint16_t& ip, const uint8_t n)
@@ -42,7 +48,6 @@ namespace
         else
             ip += static_cast<uint16_t>(n);
     }
-
 
     constexpr void RelativeJump16(uint16_t& ip, const uint16_t n)
     {
@@ -64,6 +69,190 @@ namespace
     {
         __builtin_unreachable();
     }
+
+    uint16_t& GetSReg16(cpu::State& state, int n)
+    {
+        switch (n) {
+            case SEG_ES:
+                return state.m_es;
+            case SEG_CS:
+                return state.m_cs;
+            case SEG_SS:
+                return state.m_ss;
+            case SEG_DS:
+                return state.m_ds;
+        }
+        Unreachable();
+    }
+
+    uint16_t& GetReg8(cpu::State& state, int n, unsigned int& shift)
+    {
+        shift = (n > 3) ? 8 : 0;
+        switch (n & 3) {
+            case 0:
+                return state.m_ax;
+            case 1:
+                return state.m_cx;
+            case 2:
+                return state.m_dx;
+            case 3:
+                return state.m_bx;
+        }
+        Unreachable();
+    }
+
+    uint16_t& GetReg16(cpu::State& state, int n)
+    {
+        switch (n) {
+            case 0:
+                return state.m_ax;
+            case 1:
+                return state.m_cx;
+            case 2:
+                return state.m_dx;
+            case 3:
+                return state.m_bx;
+            case 4:
+                return state.m_sp;
+            case 5:
+                return state.m_bp;
+            case 6:
+                return state.m_si;
+            case 7:
+                return state.m_di;
+        }
+        Unreachable();
+    }
+
+    void SetReg8(uint16_t& reg, unsigned int shift, uint8_t val)
+    {
+        if (shift > 0) {
+            reg = (reg & 0x00ff) | (val << 8);
+        } else {
+            reg = (reg & 0xff00) | val;
+        }
+    }
+
+    uint8_t ReadEA8(Memory& memory, cpu::State& state, const DecodeState& oState)
+    {
+        if (oState.m_type == DecodeState::T_REG) {
+            unsigned int shift;
+            uint16_t& v = GetReg8(state, oState.m_reg, shift);
+            return (v >> shift) & 0xff;
+        }
+
+        uint16_t seg_base = 0;
+        switch (oState.m_seg) {
+            case SEG_ES:
+                seg_base = state.m_es;
+                break;
+            case SEG_CS:
+                seg_base = state.m_cs;
+                break;
+            case SEG_DS:
+                seg_base = state.m_ds;
+                break;
+            case SEG_SS:
+                seg_base = state.m_ss;
+                break;
+            default:
+                Unreachable();
+        }
+        return memory.ReadByte(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp));
+    }
+
+    void WriteEA8(Memory& memory, cpu::State& state, const DecodeState& oState, uint8_t val)
+    {
+        if (oState.m_type == DecodeState::T_REG) {
+            unsigned int shift;
+            uint16_t& v = GetReg8(state, oState.m_reg, shift);
+            SetReg8(v, shift, val);
+            return;
+        }
+
+        uint16_t seg_base = 0;
+        switch (oState.m_seg) {
+            case SEG_ES:
+                seg_base = state.m_es;
+                break;
+            case SEG_CS:
+                seg_base = state.m_cs;
+                break;
+            case SEG_DS:
+                seg_base = state.m_ds;
+                break;
+            case SEG_SS:
+                seg_base = state.m_ss;
+                break;
+            default:
+                Unreachable();
+        }
+        memory.WriteByte(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp), val);
+    }
+
+    uint16_t ReadEA16(Memory& memory, cpu::State& state, const DecodeState& oState)
+    {
+        if (oState.m_type == DecodeState::T_REG) {
+            return GetReg16(state, oState.m_reg);
+        }
+
+        uint16_t seg_base = 0;
+        switch (oState.m_seg) {
+            case SEG_ES:
+                seg_base = state.m_es;
+                break;
+            case SEG_CS:
+                seg_base = state.m_cs;
+                break;
+            case SEG_DS:
+                seg_base = state.m_ds;
+                break;
+            case SEG_SS:
+                seg_base = state.m_ss;
+                break;
+            default:
+                Unreachable();
+                break;
+        }
+        return memory.ReadWord(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp));
+    }
+
+    uint16_t GetAddrEA16(cpu::State& state, const DecodeState& oState)
+    {
+        if (oState.m_type == DecodeState::T_REG)
+            return GetReg16(state, oState.m_reg);
+
+        return oState.m_off + oState.m_disp;
+    }
+
+    void WriteEA16(Memory& memory, cpu::State& state, const DecodeState& oState, uint16_t value)
+    {
+        if (oState.m_type == DecodeState::T_REG) {
+            GetReg16(state, oState.m_reg) = value;
+            return;
+        }
+
+        uint16_t seg_base = 0;
+        switch (oState.m_seg) {
+            case SEG_ES:
+                seg_base = state.m_es;
+                break;
+            case SEG_CS:
+                seg_base = state.m_cs;
+                break;
+            case SEG_DS:
+                seg_base = state.m_ds;
+                break;
+            case SEG_SS:
+                seg_base = state.m_ss;
+                break;
+            default:
+                Unreachable();
+                break;
+        }
+        memory.WriteWord(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp), value);
+    }
+
 }
 
 namespace
@@ -118,15 +307,15 @@ void CPUx86::RunInstruction()
     auto opEvGv = [&](auto op) {
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
-        WriteEA16(m_DecodeState, op(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm))));
+        WriteEA16(m_Memory, m_State, m_DecodeState, op(m_State.m_flags, ReadEA16(m_Memory, m_State, m_DecodeState), GetReg16(m_State, ModRm_XXX(modrm))));
     };
 
     // op Gv Ev -> Gv = op(Gv, Ev)
     auto opGvEv = [&](auto op) {
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
-        uint16_t& reg = GetReg16(ModRm_XXX(modrm));
-        reg = op(m_State.m_flags, reg, ReadEA16(m_DecodeState));
+        uint16_t& reg = GetReg16(m_State, ModRm_XXX(modrm));
+        reg = op(m_State.m_flags, reg, ReadEA16(m_Memory, m_State, m_DecodeState));
     };
 
     // Op Eb Gb -> Eb = op(Eb, Gb)
@@ -134,8 +323,8 @@ void CPUx86::RunInstruction()
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
         unsigned int shift;
-        uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-        WriteEA8(m_DecodeState, op(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff));
+        uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
+        WriteEA8(m_Memory, m_State, m_DecodeState, op(m_State.m_flags, ReadEA8(m_Memory, m_State, m_DecodeState), (reg >> shift) & 0xff));
     };
 
     // Op Gb Eb -> Gb = op(Gb, Eb)
@@ -143,8 +332,8 @@ void CPUx86::RunInstruction()
         const auto modrm = getModRm();
         DecodeEA(modrm, m_DecodeState);
         unsigned int shift;
-        uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-        SetReg8(reg, shift, op(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState)));
+        uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
+        SetReg8(reg, shift, op(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_Memory, m_State, m_DecodeState)));
     };
 
     auto opcode = GetNextOpcode();
@@ -419,28 +608,28 @@ void CPUx86::RunInstruction()
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            alu::CMP<8>(m_State.m_flags, ReadEA8(m_DecodeState), (reg >> shift) & 0xff);
+            uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
+            alu::CMP<8>(m_State.m_flags, ReadEA8(m_Memory, m_State, m_DecodeState), (reg >> shift) & 0xff);
             break;
         }
         case 0x39: /* CMP Ev Gv */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            alu::CMP<16>(m_State.m_flags, ReadEA16(m_DecodeState), GetReg16(ModRm_XXX(modrm)));
+            alu::CMP<16>(m_State.m_flags, ReadEA16(m_Memory, m_State, m_DecodeState), GetReg16(m_State, ModRm_XXX(modrm)));
             break;
         }
         case 0x3a: /* CMP Gb Eb */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            alu::CMP<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
+            alu::CMP<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_Memory, m_State, m_DecodeState));
             break;
         }
         case 0x3b: /* CMP Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            alu::CMP<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            alu::CMP<16>(m_State.m_flags, GetReg16(m_State, ModRm_XXX(modrm)), ReadEA16(m_Memory, m_State, m_DecodeState));
             break;
         }
         case 0x3c: /* CMP AL Ib */ {
@@ -727,29 +916,29 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             const auto imm = getImm8();
 
-            uint8_t val = ReadEA8(m_DecodeState);
+            uint8_t val = ReadEA8(m_Memory, m_State, m_DecodeState);
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA8(m_DecodeState, alu::ADD<8>(m_State.m_flags, val, imm));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::ADD<8>(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA8(m_DecodeState, alu::OR<8>(m_State.m_flags, val, imm));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::OR<8>(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA8(m_DecodeState, alu::ADC<8>(m_State.m_flags, val, imm));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::ADC<8>(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA8(m_DecodeState, alu::SBB<8>(m_State.m_flags, val, imm));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::SBB<8>(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA8(m_DecodeState, alu::AND<8>(m_State.m_flags, val, imm));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::AND<8>(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA8(m_DecodeState, alu::SUB<8>(m_State.m_flags, val, imm));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::SUB<8>(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA8(m_DecodeState, alu::XOR<8>(m_State.m_flags, val, imm));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::XOR<8>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
                     alu::CMP<8>(m_State.m_flags, val, imm);
@@ -762,29 +951,29 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             const auto imm = getImm16();
 
-            uint16_t val = ReadEA16(m_DecodeState);
+            uint16_t val = ReadEA16(m_Memory, m_State, m_DecodeState);
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, alu::ADD<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::ADD<16>(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, alu::OR<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::OR<16>(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, alu::ADC<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::ADC<16>(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, alu::SBB<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::SBB<16>(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, alu::AND<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::AND<16>(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, alu::SUB<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::SUB<16>(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
                     alu::CMP<16>(m_State.m_flags, val, imm);
@@ -797,29 +986,29 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
             const auto imm = ExtendSign8To16(getImm8());
 
-            uint16_t val = ReadEA16(m_DecodeState);
+            uint16_t val = ReadEA16(m_Memory, m_State, m_DecodeState);
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // add
-                    WriteEA16(m_DecodeState, alu::ADD<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::ADD<16>(m_State.m_flags, val, imm));
                     break;
                 case 1: // or
-                    WriteEA16(m_DecodeState, alu::OR<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::OR<16>(m_State.m_flags, val, imm));
                     break;
                 case 2: // adc
-                    WriteEA16(m_DecodeState, alu::ADC<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::ADC<16>(m_State.m_flags, val, imm));
                     break;
                 case 3: // sbb
-                    WriteEA16(m_DecodeState, alu::SBB<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::SBB<16>(m_State.m_flags, val, imm));
                     break;
                 case 4: // and
-                    WriteEA16(m_DecodeState, alu::AND<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::AND<16>(m_State.m_flags, val, imm));
                     break;
                 case 5: // sub
-                    WriteEA16(m_DecodeState, alu::SUB<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::SUB<16>(m_State.m_flags, val, imm));
                     break;
                 case 6: // xor
-                    WriteEA16(m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::XOR<16>(m_State.m_flags, val, imm));
                     break;
                 case 7: // cmp
                     alu::CMP<16>(m_State.m_flags, val, imm);
@@ -831,85 +1020,85 @@ void CPUx86::RunInstruction()
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            alu::TEST<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_DecodeState));
+            uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
+            alu::TEST<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_Memory, m_State, m_DecodeState));
             break;
         }
         case 0x85: /* TEST Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            alu::TEST<16>(m_State.m_flags, GetReg16(ModRm_XXX(modrm)), ReadEA16(m_DecodeState));
+            alu::TEST<16>(m_State.m_flags, GetReg16(m_State, ModRm_XXX(modrm)), ReadEA16(m_Memory, m_State, m_DecodeState));
             break;
         }
         case 0x86: /* XCHG Gb Eb */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
+            uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
             uint8_t prev_reg = (reg >> shift) & 0xff;
-            SetReg8(reg, shift, ReadEA8(m_DecodeState));
-            WriteEA8(m_DecodeState, prev_reg);
+            SetReg8(reg, shift, ReadEA8(m_Memory, m_State, m_DecodeState));
+            WriteEA8(m_Memory, m_State, m_DecodeState, prev_reg);
             break;
         }
         case 0x87: /* XCHG Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            uint16_t& reg = GetReg16(ModRm_XXX(modrm));
+            uint16_t& reg = GetReg16(m_State, ModRm_XXX(modrm));
             uint16_t prev_reg = reg;
-            reg = ReadEA16(m_DecodeState);
-            WriteEA16(m_DecodeState, prev_reg);
+            reg = ReadEA16(m_Memory, m_State, m_DecodeState);
+            WriteEA16(m_Memory, m_State, m_DecodeState, prev_reg);
             break;
         }
         case 0x88: /* MOV Eb Gb */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            WriteEA8(m_DecodeState, (reg >> shift) & 0xff);
+            uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
+            WriteEA8(m_Memory, m_State, m_DecodeState, (reg >> shift) & 0xff);
             break;
         }
         case 0x89: /* MOV Ev Gv */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            WriteEA16(m_DecodeState, GetReg16(ModRm_XXX(modrm)));
+            WriteEA16(m_Memory, m_State, m_DecodeState, GetReg16(m_State, ModRm_XXX(modrm)));
             break;
         }
         case 0x8a: /* MOV Gb Eb */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             unsigned int shift;
-            uint16_t& reg = GetReg8(ModRm_XXX(modrm), shift);
-            SetReg8(reg, shift, ReadEA8(m_DecodeState));
+            uint16_t& reg = GetReg8(m_State, ModRm_XXX(modrm), shift);
+            SetReg8(reg, shift, ReadEA8(m_Memory, m_State, m_DecodeState));
             break;
         }
         case 0x8b: /* MOV Gv Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GetReg16(ModRm_XXX(modrm)) = ReadEA16(m_DecodeState);
+            GetReg16(m_State, ModRm_XXX(modrm)) = ReadEA16(m_Memory, m_State, m_DecodeState);
             break;
         }
         case 0x8c: /* MOV Ew Sw */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            WriteEA16(m_DecodeState, GetSReg16(ModRm_XXX(modrm)));
+            WriteEA16(m_Memory, m_State, m_DecodeState, GetSReg16(m_State, ModRm_XXX(modrm)));
             break;
         }
         case 0x8d: /* LEA Gv M */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GetReg16(ModRm_XXX(modrm)) = GetAddrEA16(m_DecodeState);
+            GetReg16(m_State, ModRm_XXX(modrm)) = GetAddrEA16(m_State, m_DecodeState);
             break;
         }
         case 0x8e: /* MOV Sw Ew */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            GetSReg16(ModRm_XXX(modrm)) = ReadEA16(m_DecodeState);
+            GetSReg16(m_State, ModRm_XXX(modrm)) = ReadEA16(m_Memory, m_State, m_DecodeState);
             break;
         }
         case 0x8f: /* POP Ev */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            WriteEA16(m_DecodeState, Pop16());
+            WriteEA16(m_Memory, m_State, m_DecodeState, Pop16());
             break;
         }
         case 0x90: /* XCHG eAX eAX (NOP) */
@@ -920,7 +1109,7 @@ void CPUx86::RunInstruction()
         case 0x95: /* XCHG eBP eAX */
         case 0x96: /* XCHG eSI eAX */
         case 0x97: /* XCHG eDI eAX */ {
-            uint16_t& reg = GetReg16(opcode - 0x90);
+            uint16_t& reg = GetReg16(m_State, opcode - 0x90);
             uint16_t prev_ax = m_State.m_ax;
             m_State.m_ax = reg;
             reg = prev_ax;
@@ -937,7 +1126,7 @@ void CPUx86::RunInstruction()
                 m_State.m_dx = 0;
             break;
         }
-        case 0x9a: /* CALL Ap */ {
+        case 0x9a: /* 0ALL Ap */ {
             const auto ip = getImm16();
             const auto cs = getImm16();
             Push16(m_State.m_cs);
@@ -970,25 +1159,25 @@ void CPUx86::RunInstruction()
             const auto imm = getImm16();
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax =
-                (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(seg), imm));
+                (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), imm));
             break;
         }
         case 0xa1: /* MOV eAX Ov */ {
             const auto imm = getImm16();
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(seg), imm));
+            m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(m_State, seg), imm));
             break;
         }
         case 0xa2: /* MOV Ob AL */ {
             const auto imm = getImm16();
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            m_Memory.WriteByte(MakeAddr(GetSReg16(seg), imm), m_State.m_ax & 0xff);
+            m_Memory.WriteByte(MakeAddr(GetSReg16(m_State, seg), imm), m_State.m_ax & 0xff);
             break;
         }
         case 0xa3: /* MOV Ov eAX */ {
             const auto imm = getImm16();
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            m_Memory.WriteWord(MakeAddr(GetSReg16(seg), imm), m_State.m_ax);
+            m_Memory.WriteWord(MakeAddr(GetSReg16(m_State, seg), imm), m_State.m_ax);
             break;
         }
         case 0xa4: /* MOVSB */ {
@@ -999,7 +1188,7 @@ void CPUx86::RunInstruction()
                     m_State.m_cx--;
                     m_Memory.WriteByte(
                         MakeAddr(m_State.m_es, m_State.m_di),
-                        m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)));
+                        m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
                 }
@@ -1007,7 +1196,7 @@ void CPUx86::RunInstruction()
             } else {
                 m_Memory.WriteByte(
                     MakeAddr(m_State.m_es, m_State.m_di),
-                    m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)));
+                    m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)));
                 m_State.m_si += delta;
                 m_State.m_di += delta;
             }
@@ -1021,7 +1210,7 @@ void CPUx86::RunInstruction()
                     m_State.m_cx--;
                     m_Memory.WriteWord(
                         MakeAddr(m_State.m_es, m_State.m_di),
-                        m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si)));
+                        m_Memory.ReadWord(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
                 }
@@ -1029,7 +1218,7 @@ void CPUx86::RunInstruction()
             } else {
                 m_Memory.WriteWord(
                     MakeAddr(m_State.m_es, m_State.m_di),
-                    m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si)));
+                    m_Memory.ReadWord(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)));
                 m_State.m_si += delta;
                 m_State.m_di += delta;
             }
@@ -1043,7 +1232,7 @@ void CPUx86::RunInstruction()
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     alu::CMP<8>(m_State.m_flags,
-                        m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
+                        m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)),
                         m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
@@ -1053,7 +1242,7 @@ void CPUx86::RunInstruction()
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 alu::CMP<8>(m_State.m_flags,
-                    m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
+                    m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
                 m_State.m_di += delta;
@@ -1068,7 +1257,7 @@ void CPUx86::RunInstruction()
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     alu::CMP<16>(m_State.m_flags,
-                        m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si)),
+                        m_Memory.ReadWord(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)),
                         m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                     m_State.m_si += delta;
                     m_State.m_di += delta;
@@ -1078,7 +1267,7 @@ void CPUx86::RunInstruction()
                 m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 alu::CMP<16>(m_State.m_flags,
-                    m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si)),
+                    m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)),
                     m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_si += delta;
                 m_State.m_di += delta;
@@ -1129,7 +1318,7 @@ void CPUx86::RunInstruction()
         case 0xac: /* LODSB */ {
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax =
-                (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(seg), m_State.m_si));
+                (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si));
             if (cpu::FlagDirection(m_State.m_flags))
                 m_State.m_si--;
             else
@@ -1138,7 +1327,7 @@ void CPUx86::RunInstruction()
         }
         case 0xad: /* LODSW */ {
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
-            m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(seg), m_State.m_si));
+            m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(m_State, seg), m_State.m_si));
             if (cpu::FlagDirection(m_State.m_flags))
                 m_State.m_si -= 2;
             else
@@ -1284,11 +1473,11 @@ void CPUx86::RunInstruction()
         case 0xc5: /* LDS Gv Mp */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
-            uint16_t& reg = GetReg16(ModRm_XXX(modrm));
+            uint16_t& reg = GetReg16(m_State, ModRm_XXX(modrm));
 
-            uint16_t new_off = ReadEA16(m_DecodeState);
+            uint16_t new_off = ReadEA16(m_Memory, m_State, m_DecodeState);
             m_DecodeState.m_off += 2;
-            uint16_t new_seg = ReadEA16(m_DecodeState);
+            uint16_t new_seg = ReadEA16(m_Memory, m_State, m_DecodeState);
 
             if (opcode == 0xc4)
                 m_State.m_es = new_seg;
@@ -1301,14 +1490,14 @@ void CPUx86::RunInstruction()
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             const auto imm = getImm8();
-            WriteEA8(m_DecodeState, imm);
+            WriteEA8(m_Memory, m_State, m_DecodeState, imm);
             break;
         }
         case 0xc7: /* MOV Ev Iv */ {
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
             const auto imm = getImm16();
-            WriteEA16(m_DecodeState, imm);
+            WriteEA16(m_Memory, m_State, m_DecodeState, imm);
             break;
         }
         case 0xc8: /* -- */ {
@@ -1356,7 +1545,7 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
 
             unsigned int op = ModRm_XXX(modrm);
-            uint8_t val = ReadEA8(m_DecodeState);
+            uint8_t val = ReadEA8(m_Memory, m_State, m_DecodeState);
             switch (op) {
                 case 0: // rol
                     val = alu::ROL<8>(m_State.m_flags, val, 1);
@@ -1383,7 +1572,7 @@ void CPUx86::RunInstruction()
                     val = alu::SAR<8>(m_State.m_flags, val, 1);
                     break;
             }
-            WriteEA8(m_DecodeState, val);
+            WriteEA8(m_Memory, m_State, m_DecodeState, val);
             break;
         }
         case 0xd1: /* GRP2 Ev 1 */ {
@@ -1391,7 +1580,7 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
 
             unsigned int op = ModRm_XXX(modrm);
-            uint16_t val = ReadEA16(m_DecodeState);
+            uint16_t val = ReadEA16(m_Memory, m_State, m_DecodeState);
             switch (op) {
                 case 0: // rol
                     val = alu::ROL<16>(m_State.m_flags, val, 1);
@@ -1418,7 +1607,7 @@ void CPUx86::RunInstruction()
                     val = alu::SAR<16>(m_State.m_flags, val, 1);
                     break;
             }
-            WriteEA16(m_DecodeState, val);
+            WriteEA16(m_Memory, m_State, m_DecodeState, val);
             break;
         }
         case 0xd2: /* GRP2 Eb CL */ {
@@ -1426,7 +1615,7 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
 
             unsigned int op = ModRm_XXX(modrm);
-            uint8_t val = ReadEA8(m_DecodeState);
+            uint8_t val = ReadEA8(m_Memory, m_State, m_DecodeState);
             uint8_t cnt = m_State.m_cx & 0xff;
             switch (op) {
                 case 0: // rol
@@ -1454,7 +1643,7 @@ void CPUx86::RunInstruction()
                     val = alu::SAR<8>(m_State.m_flags, val, cnt);
                     break;
             }
-            WriteEA8(m_DecodeState, val);
+            WriteEA8(m_Memory, m_State, m_DecodeState, val);
             break;
         }
         case 0xd3: /* GRP2 Ev CL */ {
@@ -1462,7 +1651,7 @@ void CPUx86::RunInstruction()
             DecodeEA(modrm, m_DecodeState);
 
             unsigned int op = ModRm_XXX(modrm);
-            uint16_t val = ReadEA16(m_DecodeState);
+            uint16_t val = ReadEA16(m_Memory, m_State, m_DecodeState);
             uint8_t cnt = m_State.m_cx & 0xff;
             switch (op) {
                 case 0: // rol
@@ -1490,7 +1679,7 @@ void CPUx86::RunInstruction()
                     val = alu::SAR<16>(m_State.m_flags, val, cnt);
                     break;
             }
-            WriteEA16(m_DecodeState, val);
+            WriteEA16(m_Memory, m_State, m_DecodeState, val);
             break;
         }
         case 0xd4: /* AAM I0 */ {
@@ -1636,30 +1825,30 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Ib */ {
                     const auto imm = getImm8();
-                    alu::TEST<8>(m_State.m_flags, ReadEA8(m_DecodeState), imm);
+                    alu::TEST<8>(m_State.m_flags, ReadEA8(m_Memory, m_State, m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
                     invalidOpcode();
                     break;
                 case 2: /* NOT */
-                    WriteEA8(m_DecodeState, 0xFF - ReadEA8(m_DecodeState));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, 0xFF - ReadEA8(m_Memory, m_State, m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA8(m_DecodeState, alu::NEG<8>(m_State.m_flags, ReadEA8(m_DecodeState)));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::NEG<8>(m_State.m_flags, ReadEA8(m_Memory, m_State, m_DecodeState)));
                     break;
                 case 4: /* MUL */
-                    alu::Mul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
+                    alu::Mul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_Memory, m_State, m_DecodeState));
                     break;
                 case 5: /* IMUL */
-                    alu::Imul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_DecodeState));
+                    alu::Imul8(m_State.m_flags, m_State.m_ax, ReadEA8(m_Memory, m_State, m_DecodeState));
                     break;
                 case 6: /* DIV */
-                    if (alu::Div8(m_State.m_ax, ReadEA8(m_DecodeState)))
+                    if (alu::Div8(m_State.m_ax, ReadEA8(m_Memory, m_State, m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
-                    if (alu::Idiv8(m_State.m_ax, m_State.m_dx, ReadEA8(m_DecodeState)))
+                    if (alu::Idiv8(m_State.m_ax, m_State.m_dx, ReadEA8(m_Memory, m_State, m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
@@ -1673,30 +1862,30 @@ void CPUx86::RunInstruction()
             switch (op) {
                 case 0: /* TEST Eb Iw */ {
                     const auto imm = getImm16();
-                    alu::TEST<16>(m_State.m_flags, ReadEA16(m_DecodeState), imm);
+                    alu::TEST<16>(m_State.m_flags, ReadEA16(m_Memory, m_State, m_DecodeState), imm);
                     break;
                 }
                 case 1: /* invalid */
                     invalidOpcode();
                     break;
                 case 2: /* NOT */
-                    WriteEA16(m_DecodeState, 0xFFFF - ReadEA16(m_DecodeState));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, 0xFFFF - ReadEA16(m_Memory, m_State, m_DecodeState));
                     break;
                 case 3: /* NEG */
-                    WriteEA16(m_DecodeState, alu::NEG<16>(m_State.m_flags, ReadEA16(m_DecodeState)));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::NEG<16>(m_State.m_flags, ReadEA16(m_Memory, m_State, m_DecodeState)));
                     break;
                 case 4: /* MUL */
-                    alu::Mul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
+                    alu::Mul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_Memory, m_State, m_DecodeState));
                     break;
                 case 5: /* IMUL */
-                    alu::Imul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState));
+                    alu::Imul16(m_State.m_flags, m_State.m_ax, m_State.m_dx, ReadEA16(m_Memory, m_State, m_DecodeState));
                     break;
                 case 6: /* DIV */
-                    if (alu::Div16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
+                    if (alu::Div16(m_State.m_ax, m_State.m_dx, ReadEA16(m_Memory, m_State, m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
-                    if (alu::Idiv16(m_State.m_ax, m_State.m_dx, ReadEA16(m_DecodeState)))
+                    if (alu::Idiv16(m_State.m_ax, m_State.m_dx, ReadEA16(m_Memory, m_State, m_DecodeState)))
                         SignalInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
@@ -1730,14 +1919,14 @@ void CPUx86::RunInstruction()
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            uint8_t val = ReadEA8(m_DecodeState);
+            uint8_t val = ReadEA8(m_Memory, m_State, m_DecodeState);
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: // inc
-                    WriteEA8(m_DecodeState, alu::INC<8>(m_State.m_flags, val));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::INC<8>(m_State.m_flags, val));
                     break;
                 case 1: // dec
-                    WriteEA8(m_DecodeState, alu::DEC<8>(m_State.m_flags, val));
+                    WriteEA8(m_Memory, m_State, m_DecodeState, alu::DEC<8>(m_State.m_flags, val));
                     break;
                 default: // invalid
                     invalidOpcode();
@@ -1749,14 +1938,14 @@ void CPUx86::RunInstruction()
             const auto modrm = getModRm();
             DecodeEA(modrm, m_DecodeState);
 
-            uint16_t val = ReadEA16(m_DecodeState);
+            uint16_t val = ReadEA16(m_Memory, m_State, m_DecodeState);
             unsigned int op = ModRm_XXX(modrm);
             switch (op) {
                 case 0: /* INC eV */
-                    WriteEA16(m_DecodeState, alu::INC<16>(m_State.m_flags, val));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::INC<16>(m_State.m_flags, val));
                     break;
                 case 1: /* DEC eV */
-                    WriteEA16(m_DecodeState, alu::DEC<16>(m_State.m_flags, val));
+                    WriteEA16(m_Memory, m_State, m_DecodeState, alu::DEC<16>(m_State.m_flags, val));
                     break;
                 case 2: /* CALL Ev */
                     Push16(m_State.m_ip);
@@ -1767,7 +1956,7 @@ void CPUx86::RunInstruction()
                     Push16(m_State.m_ip);
                     m_State.m_ip = val;
                     m_DecodeState.m_off += 2;
-                    m_State.m_cs = ReadEA16(m_DecodeState);
+                    m_State.m_cs = ReadEA16(m_Memory, m_State, m_DecodeState);
                     break;
                 }
                 case 4: /* JMP Ev */
@@ -1776,7 +1965,7 @@ void CPUx86::RunInstruction()
                 case 5: /* JMP Ep */ {
                     m_State.m_ip = val;
                     m_DecodeState.m_off += 2;
-                    m_State.m_cs = ReadEA16(m_DecodeState);
+                    m_State.m_cs = ReadEA16(m_Memory, m_State, m_DecodeState);
                     break;
                 }
                 case 6: /* PUSH Ev */
@@ -1880,189 +2069,6 @@ void CPUx86::DecodeEA(uint8_t modrm, DecodeState& oState)
     } else /* mod == 3, r/m treated as reg field */ {
         oState.m_type = DecodeState::T_REG;
         oState.m_reg = rm;
-    }
-}
-
-uint16_t CPUx86::GetAddrEA16(const DecodeState& oState)
-{
-    if (oState.m_type == DecodeState::T_REG)
-        return GetReg16(oState.m_reg);
-
-    return oState.m_off + oState.m_disp;
-}
-
-uint16_t CPUx86::ReadEA16(const DecodeState& oState)
-{
-    if (oState.m_type == DecodeState::T_REG) {
-        return GetReg16(oState.m_reg);
-    }
-
-    uint16_t seg_base = 0;
-    switch (oState.m_seg) {
-        case SEG_ES:
-            seg_base = m_State.m_es;
-            break;
-        case SEG_CS:
-            seg_base = m_State.m_cs;
-            break;
-        case SEG_DS:
-            seg_base = m_State.m_ds;
-            break;
-        case SEG_SS:
-            seg_base = m_State.m_ss;
-            break;
-        default:
-            Unreachable();
-            break;
-    }
-    return m_Memory.ReadWord(MakeAddr(seg_base, oState.m_off + oState.m_disp));
-}
-
-void CPUx86::WriteEA16(const DecodeState& oState, uint16_t value)
-{
-    if (oState.m_type == DecodeState::T_REG) {
-        GetReg16(oState.m_reg) = value;
-        return;
-    }
-
-    uint16_t seg_base = 0;
-    switch (oState.m_seg) {
-        case SEG_ES:
-            seg_base = m_State.m_es;
-            break;
-        case SEG_CS:
-            seg_base = m_State.m_cs;
-            break;
-        case SEG_DS:
-            seg_base = m_State.m_ds;
-            break;
-        case SEG_SS:
-            seg_base = m_State.m_ss;
-            break;
-        default:
-            Unreachable();
-            break;
-    }
-    m_Memory.WriteWord(MakeAddr(seg_base, oState.m_off + oState.m_disp), value);
-}
-
-uint8_t CPUx86::ReadEA8(const DecodeState& oState)
-{
-    if (oState.m_type == DecodeState::T_REG) {
-        unsigned int shift;
-        uint16_t& v = GetReg8(oState.m_reg, shift);
-        return (v >> shift) & 0xff;
-    }
-
-    uint16_t seg_base = 0;
-    switch (oState.m_seg) {
-        case SEG_ES:
-            seg_base = m_State.m_es;
-            break;
-        case SEG_CS:
-            seg_base = m_State.m_cs;
-            break;
-        case SEG_DS:
-            seg_base = m_State.m_ds;
-            break;
-        case SEG_SS:
-            seg_base = m_State.m_ss;
-            break;
-        default:
-            Unreachable();
-    }
-    return m_Memory.ReadByte(MakeAddr(seg_base, oState.m_off + oState.m_disp));
-}
-
-void CPUx86::WriteEA8(const DecodeState& oState, uint8_t val)
-{
-    if (oState.m_type == DecodeState::T_REG) {
-        unsigned int shift;
-        uint16_t& v = GetReg8(oState.m_reg, shift);
-        SetReg8(v, shift, val);
-        return;
-    }
-
-    uint16_t seg_base = 0;
-    switch (oState.m_seg) {
-        case SEG_ES:
-            seg_base = m_State.m_es;
-            break;
-        case SEG_CS:
-            seg_base = m_State.m_cs;
-            break;
-        case SEG_DS:
-            seg_base = m_State.m_ds;
-            break;
-        case SEG_SS:
-            seg_base = m_State.m_ss;
-            break;
-        default:
-            Unreachable();
-    }
-    m_Memory.WriteByte(MakeAddr(seg_base, oState.m_off + oState.m_disp), val);
-}
-
-uint16_t& CPUx86::GetReg16(int n)
-{
-    switch (n) {
-        case 0:
-            return m_State.m_ax;
-        case 1:
-            return m_State.m_cx;
-        case 2:
-            return m_State.m_dx;
-        case 3:
-            return m_State.m_bx;
-        case 4:
-            return m_State.m_sp;
-        case 5:
-            return m_State.m_bp;
-        case 6:
-            return m_State.m_si;
-        case 7:
-            return m_State.m_di;
-    }
-    Unreachable();
-}
-
-uint16_t& CPUx86::GetSReg16(int n)
-{
-    switch (n) {
-        case SEG_ES:
-            return m_State.m_es;
-        case SEG_CS:
-            return m_State.m_cs;
-        case SEG_SS:
-            return m_State.m_ss;
-        case SEG_DS:
-            return m_State.m_ds;
-    }
-    Unreachable();
-}
-
-uint16_t& CPUx86::GetReg8(int n, unsigned int& shift)
-{
-    shift = (n > 3) ? 8 : 0;
-    switch (n & 3) {
-        case 0:
-            return m_State.m_ax;
-        case 1:
-            return m_State.m_cx;
-        case 2:
-            return m_State.m_dx;
-        case 3:
-            return m_State.m_bx;
-    }
-    Unreachable();
-}
-
-void CPUx86::SetReg8(uint16_t& reg, unsigned int shift, uint8_t val)
-{
-    if (shift > 0) {
-        reg = (reg & 0x00ff) | (val << 8);
-    } else {
-        reg = (reg & 0xff00) | val;
     }
 }
 

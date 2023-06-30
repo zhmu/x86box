@@ -7,10 +7,23 @@
 class IO;
 class Memory;
 
+using x86addr_t = uint32_t;
+
+class DecodeState
+{
+  public:
+    enum Type { T_REG, T_MEM };
+
+    Type m_type;
+    uint16_t m_seg, m_off;
+    uint16_t m_reg;
+    x86addr_t m_disp;
+};
+
 class CPUx86
 {
   public:
-    typedef uint32_t addr_t;
+    using addr_t = x86addr_t;
 
     CPUx86(Memory& oMemory, IO& oIO);
     ~CPUx86();
@@ -25,16 +38,6 @@ class CPUx86
 
     void Dump();
 
-    // XXX
-    void SetupForCOM(uint16_t seg)
-    {
-        m_State.m_cs = seg;
-        m_State.m_ip = 0x100;
-        m_State.m_ss = seg;
-        m_State.m_sp = 0xfff8;
-        m_State.m_ds = seg;
-        m_State.m_es = seg;
-    }
     cpu::State& GetState() { return m_State; }
     const cpu::State& GetState() const { return m_State; }
     Memory& GetMemory() { return m_Memory; }
@@ -50,37 +53,10 @@ class CPUx86
     void Push16(uint16_t value);
     uint16_t Pop16();
 
-    class DecodeState
-    {
-      public:
-        enum Type { T_REG, T_MEM };
-
-        Type m_type;
-        uint16_t m_seg, m_off;
-        uint16_t m_reg;
-        addr_t m_disp;
-    };
     DecodeState m_DecodeState;
     void DecodeEA(uint8_t modrm, DecodeState& oState);
-    uint16_t& GetReg16(int n);
-    uint16_t& GetReg8(int n, unsigned int& shift);
-    void SetReg8(uint16_t& reg, unsigned int shift, uint8_t val);
-    uint16_t& GetSReg16(int n);
-    uint16_t ReadEA16(const DecodeState& oState);
-    uint16_t GetAddrEA16(const DecodeState& oState);
-    void WriteEA16(const DecodeState& oState, uint16_t value);
-    uint8_t ReadEA8(const DecodeState& oState);
-    void WriteEA8(const DecodeState& oState, uint8_t value);
-
-    void Handle0FPrefix();
 
     void SignalInterrupt(uint8_t no);
-
-    // These must be in sync with the x86 segment values (Sw)
-    static const int SEG_ES = 0;
-    static const int SEG_CS = 1;
-    static const int SEG_SS = 2;
-    static const int SEG_DS = 3;
 
     // Interrupt values
     static const unsigned int INT_DIV_BY_ZERO = 0;
