@@ -77,7 +77,9 @@ namespace
         __builtin_unreachable();
     }
 
-    uint16_t& GetSReg16(cpu::State& state, int n)
+    template<typename T>
+    auto& GetSReg16(T& state, const int n)
+        requires (std::is_same_v<std::remove_cv_t<T>, cpu::State>)
     {
         switch (n) {
             case SEG_ES:
@@ -127,7 +129,7 @@ namespace
         }
     }
 
-    uint16_t& GetReg16(cpu::State& state, int n)
+    uint16_t& GetReg16(cpu::State& state, const int n)
     {
         switch (n) {
             case 0:
@@ -165,24 +167,8 @@ namespace
 
     CPUx86::addr_t GetModRMMemoryAddress(const ModRM_Memory& mem, const cpu::State& state)
     {
-        uint16_t seg_base = 0;
-        switch (mem.seg) {
-            case SEG_ES:
-                seg_base = state.m_es;
-                break;
-            case SEG_CS:
-                seg_base = state.m_cs;
-                break;
-            case SEG_DS:
-                seg_base = state.m_ds;
-                break;
-            case SEG_SS:
-                seg_base = state.m_ss;
-                break;
-            default:
-                Unreachable();
-        }
-        return CPUx86::MakeAddr(seg_base, mem.off + mem.disp);
+        const auto seg = GetSReg16(state, mem.seg);
+        return CPUx86::MakeAddr(seg, mem.off + mem.disp);
     }
 
     uint8_t ReadEA8(Memory& memory, cpu::State& state, const DecodeState& oState)
