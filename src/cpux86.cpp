@@ -385,7 +385,6 @@ namespace
 void CPUx86::RunInstruction()
 {
     auto getImm8 = [&]() { return GetCodeImm8(m_Memory, m_State); };
-    auto getModRm = [&]() { return GetCodeImm8(m_Memory, m_State); };
     auto getImm16 = [&]() { return GetCodeImm16(m_Memory, m_State); };
 
     auto handleConditionalJump = [&](bool take) {
