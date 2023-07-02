@@ -9,16 +9,6 @@
 
 #include "spdlog/spdlog.h"
 
-struct DecodeState
-{
-    enum Type { T_REG, T_MEM };
-
-    Type m_type;
-    uint16_t m_seg, m_off;
-    uint16_t m_reg;
-    CPUx86::addr_t m_disp;
-};
-
 CPUx86::CPUx86(Memory& oMemory, IO& oIO)
     : m_Memory(oMemory), m_IO(oIO)
 {
@@ -43,6 +33,8 @@ namespace alu = cpu::alu;
 
 namespace
 {
+    template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+
     // These must be in sync with the x86 segment values (Sw)
     constexpr int SEG_ES = 0;
     constexpr int SEG_CS = 1;
@@ -150,16 +142,23 @@ namespace
         }
     }
 
-    uint8_t ReadEA8(Memory& memory, cpu::State& state, const DecodeState& oState)
+    struct ModRM_Register
     {
-        if (oState.m_type == DecodeState::T_REG) {
-            unsigned int shift;
-            uint16_t& v = GetReg8(state, oState.m_reg, shift);
-            return (v >> shift) & 0xff;
-        }
+        uint8_t reg;
+    };
 
+    struct ModRM_Memory
+    {
+        uint16_t seg, off;
+        CPUx86::addr_t disp;
+    };
+
+    using DecodeState = std::variant<ModRM_Register, ModRM_Memory>;
+
+    CPUx86::addr_t GetModRMMemoryAddress(const ModRM_Memory& mem, const cpu::State& state)
+    {
         uint16_t seg_base = 0;
-        switch (oState.m_seg) {
+        switch (mem.seg) {
             case SEG_ES:
                 seg_base = state.m_es;
                 break;
@@ -175,99 +174,71 @@ namespace
             default:
                 Unreachable();
         }
-        return memory.ReadByte(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp));
+        return CPUx86::MakeAddr(seg_base, mem.off + mem.disp);
+    }
+
+    uint8_t ReadEA8(Memory& memory, cpu::State& state, const DecodeState& oState)
+    {
+        return std::visit(overloaded{
+            [&](const ModRM_Register& reg) -> uint8_t {
+                unsigned int shift;
+                const auto v = GetReg8(state, reg.reg, shift);
+                return (v >> shift) & 0xff;
+            },
+            [&](const ModRM_Memory& mem) {
+                const auto addr = GetModRMMemoryAddress(mem, state);
+                return memory.ReadByte(addr);
+            }
+        }, oState);
     }
 
     void WriteEA8(Memory& memory, cpu::State& state, const DecodeState& oState, uint8_t val)
     {
-        if (oState.m_type == DecodeState::T_REG) {
-            unsigned int shift;
-            uint16_t& v = GetReg8(state, oState.m_reg, shift);
-            SetReg8(v, shift, val);
-            return;
-        }
-
-        uint16_t seg_base = 0;
-        switch (oState.m_seg) {
-            case SEG_ES:
-                seg_base = state.m_es;
-                break;
-            case SEG_CS:
-                seg_base = state.m_cs;
-                break;
-            case SEG_DS:
-                seg_base = state.m_ds;
-                break;
-            case SEG_SS:
-                seg_base = state.m_ss;
-                break;
-            default:
-                Unreachable();
-        }
-        memory.WriteByte(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp), val);
+        return std::visit(overloaded{
+            [&](const ModRM_Register& reg) {
+                unsigned int shift;
+                auto& v = GetReg8(state, reg.reg, shift);
+                SetReg8(v, shift, val);
+            },
+            [&](const ModRM_Memory& mem) {
+                const auto addr = GetModRMMemoryAddress(mem, state);
+                memory.WriteByte(addr, val);
+            } }, oState);
     }
 
     uint16_t ReadEA16(Memory& memory, cpu::State& state, const DecodeState& oState, uint16_t offset_delta = 0)
     {
-        if (oState.m_type == DecodeState::T_REG) {
-            return GetReg16(state, oState.m_reg);
-        }
-
-        uint16_t seg_base = 0;
-        switch (oState.m_seg) {
-            case SEG_ES:
-                seg_base = state.m_es;
-                break;
-            case SEG_CS:
-                seg_base = state.m_cs;
-                break;
-            case SEG_DS:
-                seg_base = state.m_ds;
-                break;
-            case SEG_SS:
-                seg_base = state.m_ss;
-                break;
-            default:
-                Unreachable();
-                break;
-        }
-        return memory.ReadWord(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp + offset_delta));
+        return std::visit(overloaded{
+            [&](const ModRM_Register& reg) {
+                return GetReg16(state, reg.reg);
+            },
+            [&](const ModRM_Memory& mem) {
+                const auto addr = GetModRMMemoryAddress(mem, state);
+                return memory.ReadWord(addr + offset_delta);
+            } }, oState);
     }
 
     uint16_t GetAddrEA16(cpu::State& state, const DecodeState& oState)
     {
-        if (oState.m_type == DecodeState::T_REG)
-            return GetReg16(state, oState.m_reg);
-
-        return oState.m_off + oState.m_disp;
+        return std::visit(overloaded{
+            [&](const ModRM_Register& reg) {
+                return GetReg16(state, reg.reg);
+            },
+            [&](const ModRM_Memory& mem) -> uint16_t {
+                return mem.off + mem.disp;
+            } }, oState);
     }
 
     void WriteEA16(Memory& memory, cpu::State& state, const DecodeState& oState, uint16_t value)
     {
-        if (oState.m_type == DecodeState::T_REG) {
-            GetReg16(state, oState.m_reg) = value;
-            return;
-        }
-
-        uint16_t seg_base = 0;
-        switch (oState.m_seg) {
-            case SEG_ES:
-                seg_base = state.m_es;
-                break;
-            case SEG_CS:
-                seg_base = state.m_cs;
-                break;
-            case SEG_DS:
-                seg_base = state.m_ds;
-                break;
-            case SEG_SS:
-                seg_base = state.m_ss;
-                break;
-            default:
-                Unreachable();
-                break;
-        }
-        memory.WriteWord(CPUx86::MakeAddr(seg_base, oState.m_off + oState.m_disp), value);
+        return std::visit(overloaded{
+            [&](const ModRM_Register& reg) {
+                GetReg16(state, reg.reg) = value;
+            },
+            [&](const ModRM_Memory& mem) {
+                const auto addr = GetModRMMemoryAddress(mem, state);
+                memory.WriteWord(addr, value);
+            } }, oState);
     }
 
     void Push16(Memory& memory, cpu::State& state, const uint16_t value)
@@ -309,81 +280,75 @@ namespace
 
         const uint8_t mod = (modrm & 0xc0) >> 6;
         const uint8_t rm = modrm & 7;
+        if (mod == 3) /* rm treated as reg field */ {
+            return ModRM_Register{ .reg = rm };
+        }
+        if (mod == 0 && rm == 6) /* if mod==00 and rm==110, then EA = disp-hi; disp-lo */ {
+            const auto imm = getImm16();
+            return ModRM_Memory{
+                .seg = HandleSegmentOverride(state, SEG_DS),
+                .off = imm,
+                .disp = 0
+            };
+        }
 
-        DecodeState oState{};
-        oState.m_reg = ModRm_XXX(modrm);
+        CPUx86::addr_t disp = 0;
         switch (mod) {
-            case 0: /* DISP=0*, disp-low and disp-hi are absent */ {
-                if (rm == 6) {
-                    // except if mod==00 and rm==110, then EA = disp-hi; disp-lo
-                    const auto imm = getImm16();
-                    oState.m_type = DecodeState::T_MEM;
-                    oState.m_seg = HandleSegmentOverride(state, SEG_DS);
-                    oState.m_off = imm;
-                    oState.m_disp = 0;
-                    return oState;
-                } else {
-                    oState.m_disp = 0;
-                }
+            case 0: /* DISP=0*, disp-low and disp-hi are absent */
+                disp = 0;
                 break;
-            }
             case 1: /* DISP=disp-low sign-extended to 16-bits, disp-hi absent */ {
                 const auto imm = getImm8();
-                oState.m_disp = ExtendSign8To16(imm);
+                disp = ExtendSign8To16(imm);
                 break;
             }
             case 2: /* DISP=disp-hi:disp-lo */ {
                 const auto imm = getImm16();
-                oState.m_disp = imm;
+                disp = imm;
                 break;
             }
-            case 3: /* rm treated as reg field */ {
-                oState.m_disp = 0;
-                break;
-            }
+            default:
+                Unreachable();
         }
 
-        if (mod != 3) {
-            oState.m_type = DecodeState::T_MEM;
-            switch (rm) {
-                case 0: // (bx) + (si) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_DS);
-                    oState.m_off = state.m_bx + state.m_si;
-                    break;
-                case 1: // (bx) + (di) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_DS);
-                    oState.m_off = state.m_bx + state.m_di;
-                    break;
-                case 2: // (bp) + (si) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_SS);
-                    oState.m_off = state.m_bp + state.m_si;
-                    break;
-                case 3: // (bp) + (di) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_SS);
-                    oState.m_off = state.m_bp + state.m_di;
-                    break;
-                case 4: // (si) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_DS);
-                    oState.m_off = state.m_si;
-                    break;
-                case 5: // (di) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_DS);
-                    oState.m_off = state.m_di;
-                    break;
-                case 6: // (bp) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_SS);
-                    oState.m_off = state.m_bp;
-                    break;
-                case 7: // (bx) + disp
-                    oState.m_seg = HandleSegmentOverride(state, SEG_DS);
-                    oState.m_off = state.m_bx;
-                    break;
-            }
-        } else /* mod == 3, r/m treated as reg field */ {
-            oState.m_type = DecodeState::T_REG;
-            oState.m_reg = rm;
+        uint16_t seg, off;
+        switch (rm) {
+            case 0: // (bx) + (si) + disp
+                seg = HandleSegmentOverride(state, SEG_DS);
+                off = state.m_bx + state.m_si;
+                break;
+            case 1: // (bx) + (di) + disp
+                seg = HandleSegmentOverride(state, SEG_DS);
+                off = state.m_bx + state.m_di;
+                break;
+            case 2: // (bp) + (si) + disp
+                seg = HandleSegmentOverride(state, SEG_SS);
+                off = state.m_bp + state.m_si;
+                break;
+            case 3: // (bp) + (di) + disp
+                seg = HandleSegmentOverride(state, SEG_SS);
+                off = state.m_bp + state.m_di;
+                break;
+            case 4: // (si) + disp
+                seg = HandleSegmentOverride(state, SEG_DS);
+                off = state.m_si;
+                break;
+            case 5: // (di) + disp
+                seg = HandleSegmentOverride(state, SEG_DS);
+                off = state.m_di;
+                break;
+            case 6: // (bp) + disp
+                seg = HandleSegmentOverride(state, SEG_SS);
+                off = state.m_bp;
+                break;
+            case 7: // (bx) + disp
+                seg = HandleSegmentOverride(state, SEG_DS);
+                off = state.m_bx;
+                break;
+            default:
+                Unreachable();
         }
-        return oState;
+        return ModRM_Memory{ .seg = seg, .off = off, .disp = disp };
     }
 }
 
