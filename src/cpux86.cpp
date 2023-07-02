@@ -92,20 +92,39 @@ namespace
         Unreachable();
     }
 
-    uint16_t& GetReg8(cpu::State& state, int n, unsigned int& shift)
+    struct Reg8
     {
-        shift = (n > 3) ? 8 : 0;
-        switch (n & 3) {
-            case 0:
-                return state.m_ax;
-            case 1:
-                return state.m_cx;
-            case 2:
-                return state.m_dx;
-            case 3:
-                return state.m_bx;
+        uint16_t& reg;
+        const unsigned int shift;
+
+        uint8_t Load() const {
+            return (reg >> shift) & 0xff;
         }
-        Unreachable();
+
+        void Store(const uint8_t value) {
+            if (shift > 0) {
+                reg = (reg & 0x00ff) | (value << 8);
+            } else {
+                reg = (reg & 0xff00) | value;
+            }
+        }
+    };
+
+    Reg8 ObtainReg8(cpu::State& state, int reg)
+    {
+        const unsigned int shift = (reg > 3) ? 8 : 0;
+        switch (reg & 3) {
+            case 0:
+                return { state.m_ax, shift };
+            case 1:
+                return { state.m_cx, shift };
+            case 2:
+                return { state.m_dx, shift };
+            case 3:
+                return { state.m_bx, shift };
+            default:
+                Unreachable();
+        }
     }
 
     uint16_t& GetReg16(cpu::State& state, int n)
@@ -129,15 +148,6 @@ namespace
                 return state.m_di;
         }
         Unreachable();
-    }
-
-    void SetReg8(uint16_t& reg, unsigned int shift, uint8_t val)
-    {
-        if (shift > 0) {
-            reg = (reg & 0x00ff) | (val << 8);
-        } else {
-            reg = (reg & 0xff00) | val;
-        }
     }
 
     struct ModRM_Register
@@ -178,10 +188,8 @@ namespace
     uint8_t ReadEA8(Memory& memory, cpu::State& state, const DecodeState& oState)
     {
         return std::visit(overloaded{
-            [&](const ModRM_Register& reg) -> uint8_t {
-                unsigned int shift;
-                const auto v = GetReg8(state, reg.reg, shift);
-                return (v >> shift) & 0xff;
+            [&](const ModRM_Register& reg) {
+                return ObtainReg8(state, reg.reg).Load();
             },
             [&](const ModRM_Memory& mem) {
                 const auto addr = GetModRMMemoryAddress(mem, state);
@@ -194,9 +202,7 @@ namespace
     {
         return std::visit(overloaded{
             [&](const ModRM_Register& reg) {
-                unsigned int shift;
-                auto& v = GetReg8(state, reg.reg, shift);
-                SetReg8(v, shift, val);
+                ObtainReg8(state, reg.reg).Store(val);
             },
             [&](const ModRM_Memory& mem) {
                 const auto addr = GetModRMMemoryAddress(mem, state);
@@ -430,18 +436,16 @@ void CPUx86::RunInstruction()
     auto opEbGb = [&](auto op) {
         const auto mrr = GetModRegRm(m_Memory, m_State);
         const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-        unsigned int shift;
-        uint16_t& reg = GetReg8(m_State, mrr.reg, shift);
-        WriteEA8(m_Memory, m_State, decodeState, op(m_State.m_flags, ReadEA8(m_Memory, m_State, decodeState), (reg >> shift) & 0xff));
+        auto reg = ObtainReg8(m_State, mrr.reg);
+        WriteEA8(m_Memory, m_State, decodeState, op(m_State.m_flags, ReadEA8(m_Memory, m_State, decodeState), reg.Load()));
     };
 
     // Op Gb Eb -> Gb = op(Gb, Eb)
     auto opGbEb = [&](auto op) {
         const auto mrr = GetModRegRm(m_Memory, m_State);
         const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-        unsigned int shift;
-        uint16_t& reg = GetReg8(m_State, mrr.reg, shift);
-        SetReg8(reg, shift, op(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_Memory, m_State, decodeState)));
+        auto reg = ObtainReg8(m_State, mrr.reg);
+        reg.Store(op(m_State.m_flags, reg.Load(), ReadEA8(m_Memory, m_State, decodeState)));
     };
 
     auto opcode = GetCodeImm8(m_Memory, m_State);
@@ -715,9 +719,8 @@ void CPUx86::RunInstruction()
         case 0x38: /* CMP Eb Gb */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-            unsigned int shift;
-            auto& reg = GetReg8(m_State, mrr.reg, shift);
-            alu::CMP<8>(m_State.m_flags, ReadEA8(m_Memory, m_State, decodeState), (reg >> shift) & 0xff);
+            auto reg = ObtainReg8(m_State, mrr.reg);
+            alu::CMP<8>(m_State.m_flags, ReadEA8(m_Memory, m_State, decodeState), reg.Load());
             break;
         }
         case 0x39: /* CMP Ev Gv */ {
@@ -729,9 +732,8 @@ void CPUx86::RunInstruction()
         case 0x3a: /* CMP Gb Eb */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-            unsigned int shift;
-            auto& reg = GetReg8(m_State, mrr.reg, shift);
-            alu::CMP<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_Memory, m_State, decodeState));
+            auto reg = ObtainReg8(m_State, mrr.reg);
+            alu::CMP<8>(m_State.m_flags, reg.Load(), ReadEA8(m_Memory, m_State, decodeState));
             break;
         }
         case 0x3b: /* CMP Gv Ev */ {
@@ -1124,9 +1126,8 @@ void CPUx86::RunInstruction()
         case 0x84: /* TEST Gb Eb */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-            unsigned int shift;
-            uint16_t& reg = GetReg8(m_State, mrr.reg, shift);
-            alu::TEST<8>(m_State.m_flags, (reg >> shift) & 0xff, ReadEA8(m_Memory, m_State, decodeState));
+            auto reg = ObtainReg8(m_State, mrr.reg);
+            alu::TEST<8>(m_State.m_flags, reg.Load(), ReadEA8(m_Memory, m_State, decodeState));
             break;
         }
         case 0x85: /* TEST Gv Ev */ {
@@ -1138,11 +1139,10 @@ void CPUx86::RunInstruction()
         case 0x86: /* XCHG Gb Eb */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-            unsigned int shift;
-            uint16_t& reg = GetReg8(m_State, mrr.reg, shift);
-            uint8_t prev_reg = (reg >> shift) & 0xff;
-            SetReg8(reg, shift, ReadEA8(m_Memory, m_State, decodeState));
-            WriteEA8(m_Memory, m_State, decodeState, prev_reg);
+            auto reg = ObtainReg8(m_State, mrr.reg);
+            const auto prev_value = reg.Load();
+            reg.Store(ReadEA8(m_Memory, m_State, decodeState));
+            WriteEA8(m_Memory, m_State, decodeState, prev_value);
             break;
         }
         case 0x87: /* XCHG Gv Ev */ {
@@ -1157,9 +1157,8 @@ void CPUx86::RunInstruction()
         case 0x88: /* MOV Eb Gb */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-            unsigned int shift;
-            uint16_t& reg = GetReg8(m_State, mrr.reg, shift);
-            WriteEA8(m_Memory, m_State, decodeState, (reg >> shift) & 0xff);
+            auto reg = ObtainReg8(m_State, mrr.reg);
+            WriteEA8(m_Memory, m_State, decodeState, reg.Load());
             break;
         }
         case 0x89: /* MOV Ev Gv */ {
@@ -1171,9 +1170,8 @@ void CPUx86::RunInstruction()
         case 0x8a: /* MOV Gb Eb */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto decodeState = DecodeEA(m_Memory, m_State, mrr);
-            unsigned int shift;
-            uint16_t& reg = GetReg8(m_State, mrr.reg, shift);
-            SetReg8(reg, shift, ReadEA8(m_Memory, m_State, decodeState));
+            auto reg = ObtainReg8(m_State, mrr.reg);
+            reg.Store(ReadEA8(m_Memory, m_State, decodeState));
             break;
         }
         case 0x8b: /* MOV Gv Ev */ {
