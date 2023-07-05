@@ -99,7 +99,6 @@ struct DMA::Impl : IOPeripheral
     uint16_t In16(io_port port) override;
 
     void Reset();
-    void WriteDataFromPeriphal(int ch, std::span<const uint8_t> data);
 };
 
 DMA::DMA(IO& io, Memory& memory)
@@ -119,9 +118,9 @@ void DMA::Reset()
     impl->Reset();
 }
 
-void DMA::WriteDataFromPeriphal(int ch, std::span<const uint8_t> data)
+DMA::Transfer DMA::InitiateTransfer(int ch_num)
 {
-    impl->WriteDataFromPeriphal(ch, data);
+    return DMA::Transfer{ ch_num, *impl };
 }
 
 void DMA::Impl::Reset()
@@ -180,38 +179,50 @@ void DMA::Impl::Out8(io_port port, uint8_t val)
     }
 }
 
-void DMA::Impl::WriteDataFromPeriphal(int ch_num, std::span<const uint8_t> data)
+size_t DMA::Transfer::GetTotalLength()
 {
-    spdlog::info("dma: write data from periphal, ch {}, length {}", ch_num, data.size());
-    if (mask & (1 << ch_num)) {
-        spdlog::error("dma: ignoring write data from periphal, ch {}: channel is masked", ch_num);
-        return;
+    auto& ch = impl.channel[ch_num];
+    return ch.count + 1;
+}
+
+size_t DMA::Transfer::WriteFromPeripheral(uint16_t offset, std::span<const uint8_t> data)
+{
+    spdlog::info("dma-ch{}: write data from periphal, offset {}, length {}", ch_num, offset, data.size());
+    if (impl.mask & (1 << ch_num)) {
+        spdlog::error("dma-ch{}: ignoring write data from periphal, channel is masked", ch_num);
+        return 0;
     }
 
-    auto& ch = channel[ch_num];
-    const size_t data_expected = ch.count + 1;
-    if (data.size() != data_expected) {
-        spdlog::error("dma: ignoring write data from periphal, ch {}: size mismatch (expected {} got {})", ch_num, data_expected, data.size());
-        return;
-    }
+    auto& ch = impl.channel[ch_num];
     const auto transfer = ch.mode & mode::TransferMask;
     if (transfer != mode::WriteTransfer) {
-        spdlog::error("dma: ignoring write data from periphal, ch {}: channel not set for write transfer ({})", ch_num, transfer);
-        return;
+        spdlog::error("dma-ch{}: ignoring write data from periphal: channel not set for write transfer ({})", ch_num, transfer);
+        return 0;
     }
     if ((ch.mode & (mode::AutoInit | mode::Reverse)) != 0) {
-        spdlog::error("dma: ignoring write data from periphal, ch {}: unsupported mode {:x}", ch_num, ch.mode);
-        return;
+        spdlog::error("dma-ch{}: ignoring write data from periphal: unsupported mode {:x}", ch_num, ch.mode);
+        return 0;
     }
 
-    auto address = ch.address;
-    spdlog::info("dma: write data from periphal, ch {}, length {} to address {:x}", ch_num, data.size(), address);
+    const auto total_length = GetTotalLength();
+    if (offset + data.size() > total_length) {
+        spdlog::error("dma-ch{}: ignoring write data from periphal: attempt to write beyond buffer (needed {}, have {})", ch_num, offset + data.size(), total_length);
+        return 0;
+    }
+
+    auto address = ch.address + offset;
+    spdlog::debug("dma-ch{}: write data from periphal, length {} to address {:x}", ch_num, data.size(), address);
     for(size_t n = 0; n < data.size(); ++n) {
-        memory.WriteByte(address + n, data[n]);
+        impl.memory.WriteByte(address + n, data[n]);
     }
 
-    status |= (1 << ch_num); // set transfer complete
-    mask |= (1 << ch_num); // mask channel
+    return data.size();
+}
+
+void DMA::Transfer::Complete()
+{
+    impl.status |= (1 << ch_num); // set transfer complete
+    impl.mask |= (1 << ch_num); // mask channel
 }
 
 void DMA::Impl::Out16(io_port port, uint16_t val)
@@ -225,7 +236,7 @@ uint8_t DMA::Impl::In8(io_port port)
     switch(port) {
         case io::Status_Read: {
             const auto v = status;
-            status = status & 0xf0; // rest transfer-complete bits
+            status = status & 0xf0; // reset transfer-complete bits
             return v;
         }
     }

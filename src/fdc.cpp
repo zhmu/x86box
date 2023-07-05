@@ -318,29 +318,43 @@ bool FDC::Impl::ExecuteCurrentCommand()
         const auto dtl = fifo[8]; // special sector size (if n==0)
         spdlog::info("fdc: command: read data -> mt {} mfm {} sk {} hds {} ds1 {} ds0 {} c {} h {} r {} n {} eot {} gpl {} dtl {}", mt, mfm, sk, hds, ds1, ds0, c, h, r, n, eot, gpl, dtl);
 
-        // Tell DMA to transfer one sector
         std::array<uint8_t, 512> sector;
-#if 0
-        std::fill(sector.begin(), sector.end(), 0x0f);
-        sector[510] = 0x55;
-        sector[511] = 0xaa;
-#else
         static int fd = -1;
         if (fd < 0) {
-            fd = open("../../external/freedos/144m/x86BOOT.img", O_RDONLY);
+            fd = open("../../external/freedos2043/x86BOOT.img", O_RDONLY);
+            //fd = open("../../external/freedos2043/a.img", O_RDONLY);
+            //fd = open("../../external/freedos/144m/x86BOOT.img", O_RDONLY);
+            //fd = open("../../images/dos622.img", O_RDONLY);
             if (fd <0) std::abort();
         }
         constexpr auto NUM_HEADS = 2;
         constexpr auto NUM_SPT = 18;
         size_t offset = (c * NUM_HEADS + h) * NUM_SPT + (r - 1);
-        offset *= 512;
+        offset *= sector.size();
         spdlog::warn("fdc: reading c {} h {} s {} from offset {}", c, h, r, offset);
         lseek(fd, offset, SEEK_SET);
-        if (read(fd, sector.data(), 512) != 512) {
+
+        // Initiate DMA transfer
+        constexpr int DMA_FLOPPY = 2;
+        auto xfer = dma.InitiateTransfer(DMA_FLOPPY);
+
+        const auto total_length = xfer.GetTotalLength();
+        if ((total_length % sector.size()) != 0) {
+            spdlog::error("fdc: reading partial sectors?! ({})", total_length);
             std::abort();
         }
-#endif
-        dma.WriteDataFromPeriphal(2, sector);
+
+        for(size_t offset = 0; offset < total_length; offset += sector.size()) {
+            if (read(fd, sector.data(), sector.size()) != sector.size()) {
+                std::abort();
+            }
+            if (xfer.WriteFromPeripheral(offset, sector) == 0) {
+                spdlog::error("fdc: dma rejected our data");
+                std::abort();
+                break;
+            }
+        }
+        xfer.Complete();
 
         const uint8_t st1 = 0;
         const uint8_t st2 = 0;
