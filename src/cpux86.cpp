@@ -9,6 +9,16 @@
 
 #include "spdlog/spdlog.h"
 
+namespace
+{
+    cpu::Flags UpdateFlagsForCPU(cpu::Flags flags)
+    {
+        flags |= 0xf000; // always set top nibble to indicate 8086/8088/80186
+        flags |= cpu::flag::ON;
+        return flags;
+    }
+}
+
 CPUx86::CPUx86(Memory& oMemory, IO& oIO)
     : m_Memory(oMemory), m_IO(oIO)
 {
@@ -19,7 +29,7 @@ CPUx86::~CPUx86() = default;
 void CPUx86::Reset()
 {
     m_State.m_prefix = 0;
-    m_State.m_flags = 0;
+    m_State.m_flags = UpdateFlagsForCPU(0);
     m_State.m_cs = 0xffff;
     m_State.m_ip = 0;
     m_State.m_ds = 0;
@@ -1230,11 +1240,12 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x9c: /* PUSHF */ {
-            Push16(m_Memory, m_State, m_State.m_flags | cpu::flag::ON);
+            Push16(m_Memory, m_State, m_State.m_flags);
             break;
         }
         case 0x9d: /* POPF */ {
-            m_State.m_flags = Pop16(m_Memory, m_State) | cpu::flag::ON;
+            auto flags = Pop16(m_Memory, m_State);
+            m_State.m_flags = UpdateFlagsForCPU(flags);
             break;
         }
         case 0x9e: /* SAHF */ {
@@ -1628,7 +1639,7 @@ void CPUx86::RunInstruction()
         case 0xcf: /* IRET */ {
             m_State.m_ip = Pop16(m_Memory, m_State);
             m_State.m_cs = Pop16(m_Memory, m_State);
-            m_State.m_flags = Pop16(m_Memory, m_State);
+            m_State.m_flags = UpdateFlagsForCPU(Pop16(m_Memory, m_State));
             break;
         }
         case 0xd0: /* GRP2 Eb 1 */ {
