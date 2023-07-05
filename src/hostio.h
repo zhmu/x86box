@@ -18,6 +18,7 @@ class HostIO final
     bool IsQuitting() const;
     void putpixel(unsigned int x, unsigned int y, uint32_t c);
 
+    uint16_t GetAndClearPendingScanCode();
 };
 
 #endif /* __HOSTIO_H__ */

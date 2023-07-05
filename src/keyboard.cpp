@@ -22,6 +22,7 @@ namespace
 struct Keyboard::Impl : IOPeripheral
 {
     HostIO& hostio;
+    uint16_t scancode = 0;
 
     Impl(IO&, HostIO&);
 
@@ -47,6 +48,12 @@ Keyboard::~Keyboard() = default;
 
 void Keyboard::Reset()
 {
+    impl->scancode = 0;
+}
+
+void Keyboard::EnqueueScancode(uint16_t scancode)
+{
+    impl->scancode = scancode;
 }
 
 void Keyboard::Impl::Out8(io_port port, uint8_t val)
@@ -62,6 +69,17 @@ void Keyboard::Impl::Out16(io_port port, uint16_t val)
 uint8_t Keyboard::Impl::In8(io_port port)
 {
     spdlog::info("keyboard: in8({:x})", port);
+    switch(port) {
+        case io::Data: {
+            if (const auto value = scancode >> 8; value != 0) {
+                scancode = scancode >> 8;
+                return value;
+            }
+            const auto v = scancode;
+            scancode = 0;
+            return v;
+        }
+    }
     return 0;
 }
 

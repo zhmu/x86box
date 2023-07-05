@@ -16,6 +16,7 @@ public:
     ~Keyboard();
 
     virtual void Reset();
+    void EnqueueScancode(uint16_t scancode);
 };
 
 #endif /* __KEYBOARD_H__ */

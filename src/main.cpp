@@ -118,7 +118,6 @@ int main(int argc, char** argv)
 
         if (x86cpu->GetState().m_cs == 0 && x86cpu->GetState().m_ip == 0x7c00)
             disassembler_active = true;
-
         if (disassembler && disassembler_active) {
             const auto s = disassembler->Disassemble(*memory, x86cpu->GetState());
             std::cout << s << '\n';
@@ -134,6 +133,11 @@ int main(int argc, char** argv)
 
         if (pit->Tick()) {
             pic->AssertIRQ(0);
+        }
+
+        if (const auto scancode = hostio->GetAndClearPendingScanCode()) {
+            keyboard->EnqueueScancode(scancode);
+            pic->AssertIRQ(1);
         }
     }
     return 0;
