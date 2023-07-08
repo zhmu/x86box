@@ -285,7 +285,7 @@ namespace alu {
         UintOf<BITS> op1 = a | b;
         flags &=
             ~(cpu::flag::OF | cpu::flag::SF | cpu::flag::ZF | cpu::flag::PF | cpu::flag::CF);
-        SetFlagsSZP<8>(flags, op1);
+        SetFlagsSZP<BITS>(flags, op1);
         return op1;
     }
 
