@@ -1802,7 +1802,7 @@ void CPUx86::RunInstruction()
         case 0xd7: /* XLAT */ {
             const auto seg = HandleSegmentOverride(m_State, SEG_DS);
             m_State.m_ax = (m_State.m_ax & 0xff00) |
-                           m_Memory.ReadByte(MakeAddr(seg, m_State.m_bx + m_State.m_ax & 0xff));
+                           m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_bx + (m_State.m_ax & 0xff)));
             break;
         }
         case 0xd8: /* ESC/0 */
