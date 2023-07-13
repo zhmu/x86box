@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 namespace cpu
 {
@@ -20,6 +21,15 @@ namespace cpu
         static constexpr inline Flags OF = (1 << 11);
     }
 
+    // These must be in sync with the x86 segment values (Sw)
+    enum class Segment
+    {
+        ES = 0,
+        CS = 1,
+        SS = 2,
+        DS = 3
+    };
+
     //! \brief CPU state
     class State
     {
@@ -28,11 +38,10 @@ namespace cpu
         uint16_t m_es, m_cs, m_ss, m_ds;
         uint16_t m_flags;
         uint16_t m_prefix;
-        uint16_t m_seg_override;
+        std::optional<Segment> m_seg_override;
 
         static const unsigned int PREFIX_REPZ = (1 << 0);
         static const unsigned int PREFIX_REPNZ = (1 << 1);
-        static const unsigned int PREFIX_SEG = (1 << 2);
     };
 
     void Dump(const State& state);

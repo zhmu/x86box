@@ -45,12 +45,6 @@ namespace
 {
     template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 
-    // These must be in sync with the x86 segment values (Sw)
-    constexpr int SEG_ES = 0;
-    constexpr int SEG_CS = 1;
-    constexpr int SEG_SS = 2;
-    constexpr int SEG_DS = 3;
-
     // Interrupt values
     constexpr unsigned int INT_DIV_BY_ZERO = 0;
     constexpr unsigned int INT_SINGLE_STEP = 1;
@@ -74,12 +68,9 @@ namespace
             ip += n;
     }
 
-    uint16_t HandleSegmentOverride(cpu::State& state, uint16_t def)
+    cpu::Segment HandleSegmentOverride(cpu::State& state, const cpu::Segment def)
     {
-        if ((state.m_prefix & cpu::State::PREFIX_SEG) == 0)
-            return def;
-        state.m_prefix &= ~cpu::State::PREFIX_SEG;
-        return state.m_seg_override;
+        return state.m_seg_override.value_or(def);
     }
 
     [[noreturn]] void Unreachable()
@@ -88,17 +79,17 @@ namespace
     }
 
     template<typename T>
-    auto& GetSReg16(T& state, const int n)
+    auto& GetSReg16(T& state, const cpu::Segment seg)
         requires (std::is_same_v<std::remove_cv_t<T>, cpu::State>)
     {
-        switch (n) {
-            case SEG_ES:
+        switch (seg) {
+            case cpu::Segment::ES:
                 return state.m_es;
-            case SEG_CS:
+            case cpu::Segment::CS:
                 return state.m_cs;
-            case SEG_SS:
+            case cpu::Segment::SS:
                 return state.m_ss;
-            case SEG_DS:
+            case cpu::Segment::DS:
                 return state.m_ds;
         }
         Unreachable();
@@ -169,7 +160,8 @@ namespace
 
     struct ModRM_Memory
     {
-        uint16_t seg, off;
+        cpu::Segment seg;
+        uint16_t off;
         CPUx86::addr_t disp;
     };
 
@@ -308,6 +300,11 @@ namespace
         return DecodeModXXXRm<ModOpRM>(v);
     }
 
+    cpu::Segment GetModRegRmSegment(const ModRegRM& mrr)
+    {
+        return static_cast<cpu::Segment>(mrr.reg);
+    }
+
     template<typename T>
     ModRM DecodeModRm(Memory& memory, cpu::State& state, const T& mr)
         requires (std::is_same_v<T, ModOpRM> || std::is_same_v<T, ModRegRM>)
@@ -318,7 +315,7 @@ namespace
         if (mr.mod == 0 && mr.rm == 6) /* if mod==00 and rm==110, then EA = disp-hi; disp-lo */ {
             const auto imm = GetCodeImm16(memory, state);
             return ModRM_Memory{
-                .seg = HandleSegmentOverride(state, SEG_DS),
+                .seg = HandleSegmentOverride(state, cpu::Segment::DS),
                 .off = imm,
                 .disp = 0
             };
@@ -343,38 +340,39 @@ namespace
                 Unreachable();
         }
 
-        uint16_t seg, off;
+        cpu::Segment seg{};
+        uint16_t off;
         switch (mr.rm) {
             case 0: // (bx) + (si) + disp
-                seg = HandleSegmentOverride(state, SEG_DS);
+                seg = HandleSegmentOverride(state, cpu::Segment::DS);
                 off = state.m_bx + state.m_si;
                 break;
             case 1: // (bx) + (di) + disp
-                seg = HandleSegmentOverride(state, SEG_DS);
+                seg = HandleSegmentOverride(state, cpu::Segment::DS);
                 off = state.m_bx + state.m_di;
                 break;
             case 2: // (bp) + (si) + disp
-                seg = HandleSegmentOverride(state, SEG_SS);
+                seg = HandleSegmentOverride(state, cpu::Segment::SS);
                 off = state.m_bp + state.m_si;
                 break;
             case 3: // (bp) + (di) + disp
-                seg = HandleSegmentOverride(state, SEG_SS);
+                seg = HandleSegmentOverride(state, cpu::Segment::SS);
                 off = state.m_bp + state.m_di;
                 break;
             case 4: // (si) + disp
-                seg = HandleSegmentOverride(state, SEG_DS);
+                seg = HandleSegmentOverride(state, cpu::Segment::DS);
                 off = state.m_si;
                 break;
             case 5: // (di) + disp
-                seg = HandleSegmentOverride(state, SEG_DS);
+                seg = HandleSegmentOverride(state, cpu::Segment::DS);
                 off = state.m_di;
                 break;
             case 6: // (bp) + disp
-                seg = HandleSegmentOverride(state, SEG_SS);
+                seg = HandleSegmentOverride(state, cpu::Segment::SS);
                 off = state.m_bp;
                 break;
             case 7: // (bx) + disp
-                seg = HandleSegmentOverride(state, SEG_DS);
+                seg = HandleSegmentOverride(state, cpu::Segment::DS);
                 off = state.m_bx;
                 break;
             default:
@@ -449,20 +447,16 @@ void CPUx86::RunInstruction()
 
     // Handle prefixes first
     m_State.m_prefix = 0;
-    m_State.m_seg_override = 0;
+    m_State.m_seg_override = {};
     while(true) {
         if (opcode == 0x26) { /* ES: */
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_ES;
+            m_State.m_seg_override = cpu::Segment::ES;
         } else if (opcode == 0x2e) { /* CS: */
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_CS;
+            m_State.m_seg_override = cpu::Segment::CS;
         } else if (opcode == 0x36) {/* SS: */
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_SS;
+            m_State.m_seg_override = cpu::Segment::SS;
         } else if (opcode == 0x3e) {/* DS: */
-            m_State.m_prefix |= cpu::State::PREFIX_SEG;
-            m_State.m_seg_override = SEG_DS;
+            m_State.m_seg_override = cpu::Segment::DS;
         } else if (opcode == 0xf2) { /* REPNZ */
             m_State.m_prefix |= cpu::State::PREFIX_REPNZ;
         } else if (opcode == 0xf3) { /* REPZ */
@@ -1179,7 +1173,7 @@ void CPUx86::RunInstruction()
         case 0x8c: /* MOV Ew Sw */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto modRm = DecodeModRm(m_Memory, m_State, mrr);
-            WriteEA16(m_Memory, m_State, modRm, GetSReg16(m_State, mrr.reg));
+            WriteEA16(m_Memory, m_State, modRm, GetSReg16(m_State, GetModRegRmSegment(mrr)));
             break;
         }
         case 0x8d: /* LEA Gv M */ {
@@ -1191,7 +1185,7 @@ void CPUx86::RunInstruction()
         case 0x8e: /* MOV Sw Ew */ {
             const auto mrr = GetModRegRm(m_Memory, m_State);
             const auto modRm = DecodeModRm(m_Memory, m_State, mrr);
-            GetSReg16(m_State, mrr.reg) = ReadEA16(m_Memory, m_State, modRm);
+            GetSReg16(m_State, GetModRegRmSegment(mrr)) = ReadEA16(m_Memory, m_State, modRm);
             break;
         }
         case 0x8f: /* POP Ev */ {
@@ -1258,32 +1252,32 @@ void CPUx86::RunInstruction()
         }
         case 0xa0: /* MOV AL Ob */ {
             const auto imm = getImm16();
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             m_State.m_ax =
                 (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), imm));
             break;
         }
         case 0xa1: /* MOV eAX Ov */ {
             const auto imm = getImm16();
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(m_State, seg), imm));
             break;
         }
         case 0xa2: /* MOV Ob AL */ {
             const auto imm = getImm16();
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             m_Memory.WriteByte(MakeAddr(GetSReg16(m_State, seg), imm), m_State.m_ax & 0xff);
             break;
         }
         case 0xa3: /* MOV Ov eAX */ {
             const auto imm = getImm16();
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             m_Memory.WriteWord(MakeAddr(GetSReg16(m_State, seg), imm), m_State.m_ax);
             break;
         }
         case 0xa4: /* MOVSB */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
@@ -1305,7 +1299,7 @@ void CPUx86::RunInstruction()
         }
         case 0xa5: /* MOVSW */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
@@ -1327,7 +1321,7 @@ void CPUx86::RunInstruction()
         }
         case 0xa6: /* CMPSB */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
@@ -1352,7 +1346,7 @@ void CPUx86::RunInstruction()
         }
         case 0xa7: /* CMPSW */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
                 bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
                 while (m_State.m_cx != 0) {
@@ -1417,7 +1411,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xac: /* LODSB */ {
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             m_State.m_ax =
                 (m_State.m_ax & 0xff00) | m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si));
             if (cpu::FlagDirection(m_State.m_flags))
@@ -1427,7 +1421,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xad: /* LODSW */ {
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             m_State.m_ax = m_Memory.ReadWord(MakeAddr(GetSReg16(m_State, seg), m_State.m_si));
             if (cpu::FlagDirection(m_State.m_flags))
                 m_State.m_si -= 2;
@@ -1800,7 +1794,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xd7: /* XLAT */ {
-            const auto seg = HandleSegmentOverride(m_State, SEG_DS);
+            const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
             m_State.m_ax = (m_State.m_ax & 0xff00) |
                            m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_bx + (m_State.m_ax & 0xff)));
             break;
