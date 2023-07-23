@@ -1,17 +1,16 @@
 #pragma once
 
 #include "io.h"
+#include <memory>
 
-class ATA : IOPeripheral
+class ATA final
 {
+    struct Impl;
+    std::unique_ptr<Impl> impl;
+
   public:
     ATA(IO& io);
-    virtual ~ATA() = default;
+    ~ATA();
 
     void Reset();
-
-    void Out8(io_port port, uint8_t val) override;
-    void Out16(io_port port, uint16_t val) override;
-    uint8_t In8(io_port port) override;
-    uint16_t In16(io_port port) override;
 };
