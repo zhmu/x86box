@@ -195,8 +195,8 @@ size_t DMA::Transfer::WriteFromPeripheral(uint16_t offset, std::span<const uint8
 
     auto& ch = impl.channel[ch_num];
     const auto transfer = ch.mode & mode::TransferMask;
-    if (transfer != mode::WriteTransfer) {
-        spdlog::error("dma-ch{}: ignoring write data from periphal: channel not set for write transfer ({})", ch_num, transfer);
+    if (transfer != mode::WriteTransfer && transfer != mode::VerifyTransfer) {
+        spdlog::error("dma-ch{}: ignoring write data from periphal: channel not set for write/verify transfer ({})", ch_num, transfer);
         return 0;
     }
     if ((ch.mode & (mode::AutoInit | mode::Reverse)) != 0) {
@@ -210,12 +210,13 @@ size_t DMA::Transfer::WriteFromPeripheral(uint16_t offset, std::span<const uint8
         return 0;
     }
 
-    auto address = ch.address + offset;
-    spdlog::debug("dma-ch{}: write data from periphal, length {} to address {:x}", ch_num, data.size(), address);
-    for(size_t n = 0; n < data.size(); ++n) {
-        impl.memory.WriteByte(address + n, data[n]);
+    if (transfer == mode::WriteTransfer) {
+        const auto address = ch.address + offset;
+        spdlog::debug("dma-ch{}: write data from periphal, length {} to address {:x}", ch_num, data.size(), address);
+        for(size_t n = 0; n < data.size(); ++n) {
+            impl.memory.WriteByte(address + n, data[n]);
+        }
     }
-
     return data.size();
 }
 
