@@ -56,6 +56,7 @@ namespace
         static constexpr inline uint8_t ReadSectors = 0x20;
         static constexpr inline uint8_t WriteSectors = 0x30;
         static constexpr inline uint8_t ReadSectorsWithVerify = 0x40;
+        static constexpr inline uint8_t SetMultipleMode = 0xc6;
         static constexpr inline uint8_t Identify = 0xec;
         static constexpr inline uint8_t SetFeatures = 0xef;
     }
@@ -385,6 +386,16 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             sectors_left = 1;
             transferMode = TransferMode::PeripheralToHost;
             error = 0;
+            break;
+        }
+        case command::SetMultipleMode: {
+            spdlog::info("ata: command: Set Multiple Mode ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+                cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
+            if (sector_count == 0 || sector_count == 1)  {
+                error = 0;
+            } else {
+                error = error::AbortedCommand;
+            }
             break;
         }
         case command::SetFeatures: {
