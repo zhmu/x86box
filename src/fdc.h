@@ -6,6 +6,7 @@
 class DMA;
 class IO;
 class PIC;
+class ImageProvider;
 
 class FDC final
 {
@@ -13,7 +14,7 @@ class FDC final
     std::unique_ptr<Impl> impl;
 
   public:
-    FDC(IO&, PIC&, DMA&);
+    FDC(IO&, PIC&, DMA&, ImageProvider&);
     ~FDC();
 
     void Reset();

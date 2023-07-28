@@ -2,6 +2,7 @@
 #include "io.h"
 #include "pic.h"
 #include "dma.h"
+#include "imageprovider.h"
 
 #include "spdlog/spdlog.h"
 
@@ -151,6 +152,7 @@ struct FDC::Impl : IOPeripheral
 {
     PIC& pic;
     DMA& dma;
+    ImageProvider& imageProvider;
     uint8_t dor = 0x0;
     std::array<uint8_t, 16> fifo{};
     size_t fifoWriteOffset = 0;
@@ -165,7 +167,7 @@ struct FDC::Impl : IOPeripheral
         TransmitFifoBytes,
     } state = State::Idle;
 
-    Impl(PIC& pic, DMA& dma) : pic(pic), dma(dma) { }
+    Impl(PIC& pic, DMA& dma, ImageProvider& imageProvider) : pic(pic), dma(dma), imageProvider(imageProvider) { }
 
     void Reset();
     bool ExecuteCurrentCommand();
@@ -176,8 +178,8 @@ struct FDC::Impl : IOPeripheral
     uint16_t In16(io_port port) override;
 };
 
-FDC::FDC(IO& io, PIC& pic, DMA& dma)
-    : impl(std::make_unique<Impl>(pic, dma))
+FDC::FDC(IO& io, PIC& pic, DMA& dma, ImageProvider& imageProvider)
+    : impl(std::make_unique<Impl>(pic, dma, imageProvider))
 {
     io.AddPeripheral(io::Base, 8, *impl);
 }
@@ -319,20 +321,11 @@ bool FDC::Impl::ExecuteCurrentCommand()
         spdlog::info("fdc: command: read data -> mt {} mfm {} sk {} hds {} ds1 {} ds0 {} c {} h {} r {} n {} eot {} gpl {} dtl {}", mt, mfm, sk, hds, ds1, ds0, c, h, r, n, eot, gpl, dtl);
 
         std::array<uint8_t, 512> sector;
-        static int fd = -1;
-        if (fd < 0) {
-            fd = open("../../external/freedos2043/x86BOOT.img", O_RDONLY);
-            //fd = open("../../external/freedos2043/a.img", O_RDONLY);
-            //fd = open("../../external/freedos/144m/x86BOOT.img", O_RDONLY);
-            //fd = open("../../images/dos622.img", O_RDONLY);
-            if (fd <0) std::abort();
-        }
         constexpr auto NUM_HEADS = 2;
         constexpr auto NUM_SPT = 18;
-        size_t offset = (c * NUM_HEADS + h) * NUM_SPT + (r - 1);
-        offset *= sector.size();
-        spdlog::warn("fdc: reading c {} h {} s {} from offset {}", c, h, r, offset);
-        lseek(fd, offset, SEEK_SET);
+        size_t image_offset = (c * NUM_HEADS + h) * NUM_SPT + (r - 1);
+        image_offset *= sector.size();
+        spdlog::warn("fdc: reading c {} h {} s {} from offset {}", c, h, r, image_offset);
 
         // Initiate DMA transfer
         constexpr int DMA_FLOPPY = 2;
@@ -344,11 +337,17 @@ bool FDC::Impl::ExecuteCurrentCommand()
             std::abort();
         }
 
-        for(size_t offset = 0; offset < total_length; offset += sector.size()) {
-            if (read(fd, sector.data(), sector.size()) != sector.size()) {
-                std::abort();
+        uint8_t st1 = 0;
+        const uint8_t st2 = 0;
+        for(size_t transfer_offset = 0; transfer_offset < total_length; transfer_offset += sector.size()) {
+            if (imageProvider.Read(Image::Floppy0, image_offset + transfer_offset, sector) != sector.size()) {
+                std::fill(sector.begin(), sector.end(), 0xff);
+                spdlog::error("fdc: read error from floppy0");
+                st0 |= st0::InterruptCode0; // 01: Abnormal termination
+                st1 |= st1::NoData;
+                break;
             }
-            if (xfer.WriteFromPeripheral(offset, sector) == 0) {
+            if (xfer.WriteFromPeripheral(transfer_offset, sector) == 0) {
                 spdlog::error("fdc: dma rejected our data");
                 std::abort();
                 break;
@@ -356,8 +355,6 @@ bool FDC::Impl::ExecuteCurrentCommand()
         }
         xfer.Complete();
 
-        const uint8_t st1 = 0;
-        const uint8_t st2 = 0;
         storeByteInFifo(st0);
         storeByteInFifo(st1);
         storeByteInFifo(st2);

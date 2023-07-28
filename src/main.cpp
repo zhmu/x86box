@@ -11,6 +11,7 @@
 #include "ppi.h"
 #include "rtc.h"
 #include "fdc.h"
+#include "imagelibrary.h"
 
 #include "disassembler.h"
 
@@ -56,6 +57,10 @@ int main(int argc, char** argv)
         .required();
     prog.add_argument("--rom")
         .help("use option rom");
+    prog.add_argument("--fd0")
+        .help("use specified image for floppy disk 0");
+    prog.add_argument("--hd0")
+        .help("use specified image for hard disk 0");
     prog.add_argument("-d", "--disassemble")
         .help("enable live disassembly of code prior to execution")
         .default_value(false)
@@ -70,17 +75,18 @@ int main(int argc, char** argv)
 
     spdlog::cfg::load_env_levels();
 
+    auto imageLibrary = std::make_unique<ImageLibrary>();
     auto memory = std::make_unique<Memory>();
     auto io = std::make_unique<IO>();
     auto x86cpu = std::make_unique<CPUx86>(*memory, *io);
     auto hostio = std::make_unique<HostIO>();
-    auto ata = std::make_unique<ATA>(*io);
+    auto ata = std::make_unique<ATA>(*io, imageLibrary->GetImageProvider());
     auto pic = std::make_unique<PIC>(*io);
     auto pit = std::make_unique<PIT>(*io);
     auto dma = std::make_unique<DMA>(*io, *memory);
     auto ppi = std::make_unique<PPI>(*io, *pit);
     auto rtc = std::make_unique<RTC>(*io);
-    auto fdc = std::make_unique<FDC>(*io, *pic, *dma);
+    auto fdc = std::make_unique<FDC>(*io, *pic, *dma, imageLibrary->GetImageProvider());
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
     auto keyboard = std::make_unique<Keyboard>(*io, *hostio);
     std::unique_ptr<Disassembler> disassembler;
@@ -103,6 +109,14 @@ int main(int argc, char** argv)
     if (auto rom = prog.present("--rom"); rom) {
         //"../../images/ide_xtl_padded.bin"
         load_rom(*memory, *rom, [](size_t length) { return 0xe8000; });
+    }
+    if (auto fd0 = prog.present("--fd0"); fd0 && !imageLibrary->SetImage(Image::Floppy0, fd0->c_str())) {
+        std::cerr << "Unable to attach floppy disk image '" << *fd0 << "'\n";
+        return -1;
+    }
+    if (auto hd0 = prog.present("--hd0"); hd0 && !imageLibrary->SetImage(Image::Harddisk0, hd0->c_str())) {
+        std::cerr << "Unable to attach hard disk image '" << *hd0 << "'\n";
+        return -1;
     }
 
     unsigned int n = 0, m = 0;

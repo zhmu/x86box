@@ -1,4 +1,4 @@
-add_executable(x86box cpux86.cpp io.cpp main.cpp memory.cpp vga.cpp keyboard.cpp ata.cpp pic.cpp pit.cpp dma.cpp ppi.cpp rtc.cpp fdc.cpp ${CMAKE_CURRENT_BINARY_DIR}/vgafont.h)
+add_executable(x86box cpux86.cpp io.cpp main.cpp memory.cpp vga.cpp keyboard.cpp ata.cpp pic.cpp pit.cpp dma.cpp ppi.cpp rtc.cpp fdc.cpp imagelibrary.cpp ${CMAKE_CURRENT_BINARY_DIR}/vgafont.h)
 target_include_directories(x86box PRIVATE ${SDL2_INCLUDE_DIRS})
 target_link_libraries(x86box PRIVATE ${SDL2_LIBRARIES})
 target_sources(x86box PRIVATE hostio.cpp)

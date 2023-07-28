@@ -1,4 +1,5 @@
 #include "ata.h"
+#include "imageprovider.h"
 
 #include "spdlog/spdlog.h"
 
@@ -117,7 +118,8 @@ namespace
 
 struct ATA::Impl : IOPeripheral
 {
-    Impl();
+    ImageProvider& imageProvider;
+    Impl(ImageProvider& imageProvider);
     void Reset();
 
     void Out8(io_port port, uint8_t val) override;
@@ -145,11 +147,10 @@ struct ATA::Impl : IOPeripheral
     } transferMode{TransferMode::Idle};
     uint64_t current_lba{};
     size_t sectors_left{};
-    int fd = -1;
 };
 
-ATA::ATA(IO& io)
-    : impl(std::make_unique<Impl>())
+ATA::ATA(IO& io, ImageProvider& imageProvider)
+    : impl(std::make_unique<Impl>(imageProvider))
 {
     io.AddPeripheral(io::Base, 16, *impl);
 }
@@ -161,11 +162,10 @@ void ATA::Reset()
     impl->Reset();
 }
 
-ATA::Impl::Impl()
+ATA::Impl::Impl(ImageProvider& imageProvider)
+    : imageProvider(imageProvider)
 {
     // dd if=/dev/zero of=/tmp/hdd.img bs=512 count=62730
-    fd = open("/tmp/hdd.img", O_RDWR);
-    assert(fd >= 0);
 }
 
 void ATA::Impl::Reset()
@@ -195,8 +195,8 @@ void ATA::Impl::Out8(io_port port, uint8_t val)
 
                 if (sector_data_offset == sector_data.size()) {
                     spdlog::warn("ata: out8: Sector completed");
-                    lseek(fd, current_lba * sector_data.size(), SEEK_SET);
-                    if (write(fd, sector_data.data(), sector_data.size()) != sector_data.size()) {
+
+                    if (imageProvider.Write(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
                         spdlog::error("ata: write error!!!");
                     }
 
@@ -257,8 +257,7 @@ uint8_t ATA::Impl::In8(io_port port)
                     --sectors_left;
                     if (sectors_left > 0) {
                         ++current_lba;
-                        lseek(fd, current_lba * sector_data.size(), SEEK_SET);
-                        if (read(fd, sector_data.data(), sector_data.size()) != sector_data.size()) {
+                        if (imageProvider.Read(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
                             spdlog::error("ata: read error!!!");
                             std::fill(sector_data.begin(), sector_data.end(), 0xff);
                         }
@@ -328,8 +327,7 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             current_lba = CHStoLBA(cylinder, head, sector_nr);
 
             spdlog::info("ata: read from c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
-            lseek(fd, current_lba * sector_data.size(), SEEK_SET);
-            if (read(fd, sector_data.data(), sector_data.size()) != sector_data.size()) {
+            if (imageProvider.Read(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
                 spdlog::error("ata: read error!!!");
                 std::fill(sector_data.begin(), sector_data.end(), 0xff);
             }
