@@ -11,9 +11,20 @@
 
 namespace
 {
+    // 80186/80188 always mask a shift count in ROL/ROR/SHL/SHR/etc; this is
+    // always performed by the ALU code here so we don't support anything older
+    // than 80186/80188
+    enum class CPUType {
+        CPU80188
+    };
+
+    constexpr auto inline cpuType = CPUType::CPU80188;
+
     cpu::Flags UpdateFlagsForCPU(cpu::Flags flags)
     {
-        flags |= 0xf000; // always set top nibble to indicate 8086/8088/80186
+        if constexpr (cpuType == CPUType::CPU80188) {
+            flags |= 0xf000; // always set top nibble to indicate 8086/8088/80186
+        }
         flags |= cpu::flag::ON;
         return flags;
     }
@@ -831,7 +842,12 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x54: /* PUSH eSP */ {
-            Push16(m_Memory, m_State, m_State.m_sp);
+            int delta = 0;
+            if constexpr (cpuType == CPUType::CPU80188) {
+                // SP is first decremented by 2, then pushed!
+                delta = -2;
+            }
+            Push16(m_Memory, m_State, m_State.m_sp + delta);
             break;
         }
         case 0x55: /* PUSH eBP */ {
