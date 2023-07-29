@@ -65,4 +65,5 @@ namespace cpu
     [[nodiscard]] constexpr bool FlagSign(Flags flags) { return IsFlagSet<flag::SF>(flags); }
     [[nodiscard]] constexpr bool FlagDirection(Flags flags) { return IsFlagSet<flag::DF>(flags); }
     [[nodiscard]] constexpr bool FlagOverflow(Flags flags) { return IsFlagSet<flag::OF>(flags); }
+    [[nodiscard]] constexpr bool FlagInterrupt(Flags flags) { return IsFlagSet<flag::IF>(flags); }
 }
