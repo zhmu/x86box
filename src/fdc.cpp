@@ -5,6 +5,7 @@
 #include "imageprovider.h"
 
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -158,6 +159,7 @@ struct FDC::Impl : IOPeripheral
     PIC& pic;
     DMA& dma;
     ImageProvider& imageProvider;
+    std::shared_ptr<spdlog::logger> logger;
     uint8_t dor = 0x0;
     std::array<uint8_t, 16> fifo{};
     size_t fifoWriteOffset = 0;
@@ -173,8 +175,7 @@ struct FDC::Impl : IOPeripheral
         TransmitFifoBytes,
     } state = State::Idle;
 
-    Impl(PIC& pic, DMA& dma, ImageProvider& imageProvider) : pic(pic), dma(dma), imageProvider(imageProvider) { }
-
+    Impl(PIC& pic, DMA& dma, ImageProvider& imageProvider);
     void Reset();
     bool ExecuteCurrentCommand();
 
@@ -197,6 +198,12 @@ void FDC::Reset()
     impl->Reset();
 }
 
+FDC::Impl::Impl(PIC& pic, DMA& dma, ImageProvider& imageProvider)
+    : pic(pic), dma(dma), imageProvider(imageProvider)
+    , logger(spdlog::stderr_color_st("fdc"))
+{
+}
+
 void FDC::Impl::Reset()
 {
     dor = 0x0;
@@ -211,13 +218,13 @@ void FDC::Impl::Reset()
 
 void FDC::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("fdc: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
     switch(port)
     {
         case io::DigitalOutput: {
             if ((dor & dor::ResetN) == 0 && (val & dor::ResetN) != 0) {
                 // Reset toggled from lo -> hi
-                spdlog::warn("fdc: reset");
+                logger->warn("reset");
                 Reset();
                 pic.AssertIRQ(IRQ_FDC);
             }
@@ -235,9 +242,9 @@ void FDC::Impl::Out8(io_port port, uint8_t val)
                     fifo[fifoWriteOffset] = val;
                     fifoWriteOffset += 1;
                     if (DetermineNumberOfInputBytes(fifo[0]) == fifoWriteOffset) {
-                        spdlog::info("fdc: executing command {} (fifo contains {} bytes)", fifo[0], fifoWriteOffset);
+                        logger->info("executing command {} (fifo contains {} bytes)", fifo[0], fifoWriteOffset);
                         if (ExecuteCurrentCommand()) {
-                            spdlog::info("fdc: triggering interrupt upon command completion");
+                            logger->info("triggering interrupt upon command completion");
                             pic.AssertIRQ(IRQ_FDC);
                         }
                         if (fifoReadBytesAvailable > 0) {
@@ -248,7 +255,7 @@ void FDC::Impl::Out8(io_port port, uint8_t val)
                     }
                     break;
                 default:
-                    spdlog::error("fdc: ignoring fifo write in state {}", static_cast<int>(state));
+                    logger->error("ignoring fifo write in state {}", static_cast<int>(state));
                     break;
             }
             break;
@@ -271,7 +278,7 @@ bool FDC::Impl::ExecuteCurrentCommand()
             uint8_t pcn = 0;
             storeByteInFifo(st0);
             storeByteInFifo(pcn);
-            spdlog::info("fdc: command: sense interrupt status -> st0 {:x} pcn {:x}", st0, pcn);
+            logger->info("command: sense interrupt status -> st0 {:x} pcn {:x}", st0, pcn);
             return false;
         }
         case command::Specify: {
@@ -279,12 +286,12 @@ bool FDC::Impl::ExecuteCurrentCommand()
             const auto hut = (fifo[1] & 0xf) & 0xf;
             const auto hlt = fifo[2] >> 1;
             const auto nd = (fifo[2] & 1) != 0;
-            spdlog::info("fdc: command: specify, srt {:x} hut {:x} hlt {:x} nd {}", srt, hut, hlt, nd);
+            logger->info("command: specify, srt {:x} hut {:x} hlt {:x} nd {}", srt, hut, hlt, nd);
             return false;
         }
         case command::Recalibrate: {
             const auto ds = fifo[1];
-            spdlog::info("fdc: command: recalibrate, {}", ds);
+            logger->info("command: recalibrate, {}", ds);
             current_track = 0;
             st0 = st0::SeekEnd /* | st0::EquipmentCheck */;
             return true;
@@ -294,7 +301,7 @@ bool FDC::Impl::ExecuteCurrentCommand()
             const auto ds1 = (fifo[1] & 0x2) != 0;
             const auto ds0 = (fifo[1] & 0x1) != 0;
             const auto ncn = fifo[2];
-            spdlog::info("fdc: command: seek -> hds {:x} ds1 {} ds0 {} ncn {:x}", hds, ds1, ds0, ncn);
+            logger->info("command: seek -> hds {:x} ds1 {} ds0 {} ncn {:x}", hds, ds1, ds0, ncn);
             // Let's assume any seek clears the 'disk changed' bit...
             disk_changed = false;
             return true;
@@ -310,7 +317,7 @@ bool FDC::Impl::ExecuteCurrentCommand()
         storeByteInFifo(h);  // head address (0/1)
         storeByteInFifo(r); // sector address
         storeByteInFifo(n); // sector size code (2 = 512 bytes)
-        spdlog::info("fdc: command: read id -> st0 {:x} st1 {:x} st2 {:x} c {:x} h {:x} r {:x} n {:x}", st0, st1, st2, c, h, r, n);
+        logger->info("command: read id -> st0 {:x} st1 {:x} st2 {:x} c {:x} h {:x} r {:x} n {:x}", st0, st1, st2, c, h, r, n);
         return true;
     }
     if ((cmd & 0b11111) == command::ReadData) {
@@ -327,14 +334,14 @@ bool FDC::Impl::ExecuteCurrentCommand()
         const auto eot = fifo[6]; // end-of-track (final sector number)
         const auto gpl = fifo[7]; // gap length
         const auto dtl = fifo[8]; // special sector size (if n==0)
-        spdlog::info("fdc: command: read data -> mt {} mfm {} sk {} hds {} ds1 {} ds0 {} c {} h {} r {} n {} eot {} gpl {} dtl {}", mt, mfm, sk, hds, ds1, ds0, c, h, r, n, eot, gpl, dtl);
+        logger->info("command: read data -> mt {} mfm {} sk {} hds {} ds1 {} ds0 {} c {} h {} r {} n {} eot {} gpl {} dtl {}", mt, mfm, sk, hds, ds1, ds0, c, h, r, n, eot, gpl, dtl);
 
         std::array<uint8_t, 512> sector;
         constexpr auto NUM_HEADS = 2;
         constexpr auto NUM_SPT = 18;
         size_t image_offset = (c * NUM_HEADS + h) * NUM_SPT + (r - 1);
         image_offset *= sector.size();
-        spdlog::warn("fdc: reading c {} h {} s {} from offset {}", c, h, r, image_offset);
+        logger->debug("reading c {} h {} s {} from offset {}", c, h, r, image_offset);
 
         // Initiate DMA transfer
         constexpr int DMA_FLOPPY = 2;
@@ -342,7 +349,7 @@ bool FDC::Impl::ExecuteCurrentCommand()
 
         const auto total_length = xfer.GetTotalLength();
         if ((total_length % sector.size()) != 0) {
-            spdlog::error("fdc: reading partial sectors?! ({})", total_length);
+            logger->error("reading partial sectors?! ({})", total_length);
             std::abort();
         }
 
@@ -351,13 +358,13 @@ bool FDC::Impl::ExecuteCurrentCommand()
         for(size_t transfer_offset = 0; transfer_offset < total_length; transfer_offset += sector.size()) {
             if (imageProvider.Read(Image::Floppy0, image_offset + transfer_offset, sector) != sector.size()) {
                 std::fill(sector.begin(), sector.end(), 0xff);
-                spdlog::error("fdc: read error from floppy0");
+                logger->critical("read error from floppy0");
                 st0 |= st0::InterruptCode0; // 01: Abnormal termination
                 st1 |= st1::NoData;
                 break;
             }
             if (xfer.WriteFromPeripheral(transfer_offset, sector) == 0) {
-                spdlog::error("fdc: dma rejected our data");
+                logger->critical("dma rejected our data");
                 std::abort();
                 break;
             }
@@ -373,18 +380,18 @@ bool FDC::Impl::ExecuteCurrentCommand()
         storeByteInFifo(n);
         return true;
     }
-    spdlog::warn("fdc: command: unimplemented command {:x}", fifo[0]);
+    logger->warn("command: unimplemented command {:x}", fifo[0]);
     return false;
 }
 
 void FDC::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("fdc: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint8_t FDC::Impl::In8(io_port port)
 {
-    spdlog::info("fdc: in8({:x})", port);
+    logger->info("in8({:x})", port);
     switch(port) {
         case io::MainStatus_Read: {
             uint8_t msr = 0;
@@ -401,10 +408,10 @@ uint8_t FDC::Impl::In8(io_port port)
                     msr |= msr::CommandBusy;
                     break;
                 default:
-                    spdlog::warn("fdc: read msr in unexpected state {}", static_cast<int>(state));
+                    logger->warn("read msr in unexpected state {}", static_cast<int>(state));
                     break;
             }
-            spdlog::warn("fdc: read msr in state {} -> {:x}", static_cast<int>(state), msr);
+            logger->warn("read msr in state {} -> {:x}", static_cast<int>(state), msr);
             return msr;
         }
         case io::DataFifo: {
@@ -418,7 +425,7 @@ uint8_t FDC::Impl::In8(io_port port)
                             state = State::Idle;
                         }
                     } else {
-                        spdlog::error("fdc: reading fifo beyond available bytes ({} >= {})", fifoReadOffset, fifoReadBytesAvailable);
+                        logger->error("reading fifo beyond available bytes ({} >= {})", fifoReadOffset, fifoReadBytesAvailable);
                     }
                     break;
             }
@@ -428,7 +435,7 @@ uint8_t FDC::Impl::In8(io_port port)
             uint8_t result = 0;
             if (disk_changed)
                 result |= dir::DiskChanged;
-            spdlog::info("fdc: dir_read ({:x})", result);
+            logger->info("dir_read ({:x})", result);
             return result;
         }
     }
@@ -437,7 +444,7 @@ uint8_t FDC::Impl::In8(io_port port)
 
 uint16_t FDC::Impl::In16(io_port port)
 {
-    spdlog::info("fdc: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }
 

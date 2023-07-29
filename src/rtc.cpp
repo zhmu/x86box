@@ -4,7 +4,7 @@
 
 #include <array>
 #include "spdlog/spdlog.h"
-
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 namespace
 {
@@ -66,9 +66,11 @@ namespace
 
 struct RTC::Impl : IOPeripheral
 {
+    std::shared_ptr<spdlog::logger> logger;
     std::array<uint8_t, 0x2f> cmosData{};
     uint8_t selectedRegister{};
 
+    Impl(IO& io);
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
@@ -76,9 +78,8 @@ struct RTC::Impl : IOPeripheral
 };
 
 RTC::RTC(IO& io)
-    : impl(std::make_unique<Impl>())
+    : impl(std::make_unique<Impl>(io))
 {
-    io.AddPeripheral(io::Base, 10, *impl);
 }
 
 RTC::~RTC() = default;
@@ -91,9 +92,15 @@ void RTC::Reset()
     impl->cmosData[0x10] = 0x40;
 }
 
+RTC::Impl::Impl(IO& io)
+    : logger(spdlog::stderr_color_st("rtc"))
+{
+    io.AddPeripheral(io::Base, 10, *this);
+}
+
 void RTC::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("rtc: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
     switch(port) {
         case io::Index:
             selectedRegister = val;
@@ -103,12 +110,12 @@ void RTC::Impl::Out8(io_port port, uint8_t val)
 
 void RTC::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("rtc: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint8_t RTC::Impl::In8(io_port port)
 {
-    spdlog::info("rtc: in8({:x})", port);
+    logger->info("in8({:x})", port);
     switch(port) {
         case io::Data:
             if (selectedRegister < rtc_register::StatusA || selectedRegister == rtc_register::Century) {
@@ -121,6 +128,6 @@ uint8_t RTC::Impl::In8(io_port port)
 
 uint16_t RTC::Impl::In16(io_port port)
 {
-    spdlog::info("rtc: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }

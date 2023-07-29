@@ -8,6 +8,7 @@
 #include "vgafont.h"
 
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 // http://www.osdever.net/FreeVGA/vga/vga.htm
 namespace
@@ -38,6 +39,7 @@ namespace
 
 struct VGA::Impl : XMemoryMapped, IOPeripheral
 {
+    std::shared_ptr<spdlog::logger> logger;
     HostIO& hostio;
     std::array<uint8_t, VideoMemorySize> videomem{};
 
@@ -61,6 +63,7 @@ struct VGA::Impl : XMemoryMapped, IOPeripheral
 
 VGA::Impl::Impl(Memory& memory, IO& io, HostIO& hostio)
     : hostio(hostio)
+    , logger(spdlog::stderr_color_st("vga"))
 {
     memory.AddPeripheral(0xa0000, 65535, *this);
     memory.AddPeripheral(0xb0000, 65535, *this);
@@ -98,7 +101,7 @@ void VGA::Reset()
 
 uint8_t VGA::Impl::ReadByte(Memory::Address addr)
 {
-    spdlog::info("vga: read(8) @ 0x{:4x}", addr);
+    logger->info("read(8) @ 0x{:4x}", addr);
     if (addr >= 0xb8000 && addr <= 0xb8fff) {
         return videomem[addr - 0xb8000];
     }
@@ -107,7 +110,7 @@ uint8_t VGA::Impl::ReadByte(Memory::Address addr)
 
 uint16_t VGA::Impl::ReadWord(Memory::Address addr)
 {
-    spdlog::info("vga: read(16) @ 0x{:4x}", addr);
+    logger->info("read(16) @ 0x{:4x}", addr);
     if (addr >= 0xb8000 && addr <= 0xb8fff - 1) {
         const auto a = videomem[addr - 0xb8000 + 0];
         const auto b = videomem[addr - 0xb8000 + 1];
@@ -119,7 +122,7 @@ uint16_t VGA::Impl::ReadWord(Memory::Address addr)
 
 void VGA::Impl::WriteByte(Memory::Address addr, uint8_t data)
 {
-    spdlog::info("vga: write(8) @ 0x{:4x} data=0x{:04x}", addr, data);
+    logger->info("write(8) @ 0x{:4x} data=0x{:04x}", addr, data);
     if (addr >= 0xb8000 && addr <= 0xb8fff) {
         videomem[addr - 0xb8000] = data;
     }
@@ -127,7 +130,7 @@ void VGA::Impl::WriteByte(Memory::Address addr, uint8_t data)
 
 void VGA::Impl::WriteWord(Memory::Address addr, uint16_t data)
 {
-    spdlog::info("vga: write(16) @ 0x{:4x} data=0x{:04x}", addr, data);
+    logger->info("write(16) @ 0x{:4x} data=0x{:04x}", addr, data);
     if (addr >= 0xb8000 && addr <= 0xb8fff - 1) {
         videomem[addr - 0xb8000 + 0] = data & 0xff;
         videomem[addr - 0xb8000 + 1] = data >> 8;
@@ -136,12 +139,12 @@ void VGA::Impl::WriteWord(Memory::Address addr, uint16_t data)
 
 void VGA::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("vga: out8({:x}, {:x}", port, val);
+    logger->info("out8({:x}, {:x}", port, val);
 }
 
 uint8_t VGA::Impl::In8(io_port port)
 {
-    spdlog::info("vga: in8({:x})", port);
+    logger->info("in8({:x})", port);
     switch(port) {
         case io::InputStatus1_Read: {
             // XXX Toggle HSync Output (bit 0) and Vertical Refresh (bit 3)
@@ -155,12 +158,12 @@ uint8_t VGA::Impl::In8(io_port port)
 
 void VGA::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("vga: out16({:x}, {:x}", port, val);
+    logger->info("out16({:x}, {:x}", port, val);
 }
 
 uint16_t VGA::Impl::In16(io_port port)
 {
-    spdlog::info("vga: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }
 

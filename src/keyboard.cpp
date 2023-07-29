@@ -8,6 +8,7 @@
 #include <deque>
 
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 namespace
 {
@@ -24,6 +25,7 @@ namespace
 struct Keyboard::Impl : IOPeripheral
 {
     HostIO& hostio;
+    std::shared_ptr<spdlog::logger> logger;
     std::deque<uint8_t> scancode;
 
     Impl(IO&, HostIO&);
@@ -36,6 +38,7 @@ struct Keyboard::Impl : IOPeripheral
 
 Keyboard::Impl::Impl(IO& io, HostIO& hostio)
     : hostio(hostio)
+    , logger(spdlog::stderr_color_st("keyboard"))
 {
     io.AddPeripheral(io::Data, 1, *this);
     io.AddPeripheral(io::Status_Read, 1, *this);
@@ -55,7 +58,7 @@ void Keyboard::Reset()
 
 void Keyboard::EnqueueScancode(uint16_t scancode)
 {
-    spdlog::info("keyboard: enqueue scancode {:x}", scancode);
+    impl->logger->info("enqueue scancode {:x}", scancode);
     if (scancode >= 0x100) {
         impl->scancode.push_back(scancode >> 8);
     }
@@ -64,26 +67,26 @@ void Keyboard::EnqueueScancode(uint16_t scancode)
 
 void Keyboard::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("keyboard: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
 }
 
 void Keyboard::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("keyboard: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint8_t Keyboard::Impl::In8(io_port port)
 {
-    spdlog::info("keyboard: in8({:x})", port);
+    logger->info("in8({:x})", port);
     switch(port) {
         case io::Data: {
             if (scancode.empty()) {
-                spdlog::warn("keyboard: reading data port, yet buffer is empty");
+                logger->warn("reading data port, yet buffer is empty");
                 return 0;
             }
             const auto v = scancode.front();
             scancode.pop_front();
-            spdlog::info("keyboard-in: {:x}", v);
+            logger->info("keyboard-in: {:x}", v);
             return v;
         }
     }
@@ -92,6 +95,6 @@ uint8_t Keyboard::Impl::In8(io_port port)
 
 uint16_t Keyboard::Impl::In16(io_port port)
 {
-    spdlog::info("keyboard: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }

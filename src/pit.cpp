@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 namespace
 {
@@ -49,9 +50,11 @@ struct PIT::Impl : IOPeripheral
         } state{State::LoByte};
     };
 
+    std::shared_ptr<spdlog::logger> logger;
     std::array<Channel, 3> channel;
     uint8_t control{};
 
+    Impl(IO& io);
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
@@ -61,9 +64,8 @@ struct PIT::Impl : IOPeripheral
 };
 
 PIT::PIT(IO& io)
-    : impl(std::make_unique<Impl>())
+    : impl(std::make_unique<Impl>(io))
 {
-    io.AddPeripheral(io::Base, 4, *impl);
 }
 
 PIT::~PIT() = default;
@@ -90,17 +92,23 @@ void PIT::Reset()
     }
 
     return signal_irq;
- }
+}
+ 
+PIT::Impl::Impl(IO& io)
+    : logger(spdlog::stderr_color_st("pit"))
+{
+    io.AddPeripheral(io::Base, 4, *this);
+}
 
 void PIT::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("pit: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
     switch(port) {
         case io::Mode_Command: {
             const auto sc = cw::SelectChannel(val);
             if (sc == 0b1100'0000) {
                 // Read-back
-                spdlog::error("pit: read-back not supported");
+                logger->critical("read-back not supported");
             } else {
                 const auto am = cw::AccessMode(val);
                 const auto om = cw::OperatingMode(val);
@@ -108,7 +116,7 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
                 auto& ch = channel[sc];
                 ch.access = am;
                 ch.mode = om;
-                if (bcd) spdlog::error("pit: ch{}: bcd mode not supported", sc);
+                if (bcd) logger->critical("ch{}: bcd mode not supported", sc);
                 switch(am) {
                     case 0: // Latch count value
                         ch.latch = ch.counter & 0xff;
@@ -126,7 +134,7 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
                         ch.active = false;
                         break;
                 }
-                spdlog::info("pit: ch{}: mode: am {} om {} bcd {}", sc, am, om, bcd);
+                logger->info("ch{}: mode: am {} om {} bcd {}", sc, am, om, bcd);
             }
             break;
         }
@@ -157,7 +165,7 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
                     break;
             }
             if (ch.reload == 0) ch.reload = 0x10000;
-            spdlog::info("pit: ch{}: setting reload to {:x}", port - io::Data0, ch.reload);
+            logger->info("ch{}: setting reload to {:x}", port - io::Data0, ch.reload);
             break;
         }
     }
@@ -165,15 +173,15 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
 
 void PIT::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("pit: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint8_t PIT::Impl::In8(io_port port)
 {
-    spdlog::info("pit: in8({:x})", port);
+    logger->info("in8({:x})", port);
     if (port >= io::Data0 && port <= io::Data2) {
         auto& ch = channel[port - io::Data0];
-        spdlog::info("pit: reading ch{}: counter value {:x}, access {}", port - io::Data0, ch.counter, ch.access);
+        logger->info("reading ch{}: counter value {:x}, access {}", port - io::Data0, ch.counter, ch.access);
         switch(ch.access) {
             case 0: // Latch count value
                 return ch.latch;
@@ -189,7 +197,7 @@ uint8_t PIT::Impl::In8(io_port port)
 
 uint16_t PIT::Impl::In16(io_port port)
 {
-    spdlog::info("pit: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }
 
@@ -206,16 +214,16 @@ bool PIT::Impl::TickChannel(size_t ch_num, std::chrono::steady_clock::time_point
     {
         case 0: // Interrupt On Terminal Count
             if (ch.prev_mode != ch.mode)
-                spdlog::error("pit: channel {}: 'interrupt on terminal count' mode not implemented", ch_num);
+                logger->critical("channel {}: 'interrupt on terminal count' mode not implemented", ch_num);
             break;
         case 1: // Hardware Re-Triggerable One-shot
             if (ch.prev_mode != ch.mode)
-                spdlog::error("pit: channel {}: 'hardware re-triggerable one-shot' mode not implemented", ch_num);
+                logger->critical("channel {}: 'hardware re-triggerable one-shot' mode not implemented", ch_num);
             break;
         case 2:
         case 6: // Rate generator
             if (ch.prev_mode != ch.mode)
-                spdlog::error("pit: channel {}: 'rate generator' mode not implemented", ch_num);
+                logger->critical("channel {}: 'rate generator' mode not implemented", ch_num);
             break;
         case 3: // Square Wave Generator
         case 7: {
@@ -227,11 +235,11 @@ bool PIT::Impl::TickChannel(size_t ch_num, std::chrono::steady_clock::time_point
         }
         case 4: // Software Triggered Strobe
             if (ch.prev_mode != ch.mode)
-                spdlog::error("pit: channel {}: 'software triggered strobe' mode not implemented", ch_num);
+                logger->critical("channel {}: 'software triggered strobe' mode not implemented", ch_num);
             break;
         case 5: // Hardware Triggered Strobe
             if (ch.prev_mode != ch.mode)
-                spdlog::error("pit: channel {}: 'hardware triggered strobe' mode not implemented", ch_num);
+                logger->critical("channel {}: 'hardware triggered strobe' mode not implemented", ch_num);
             break;
     }
         

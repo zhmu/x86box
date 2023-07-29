@@ -3,6 +3,7 @@
 #include "memory.h"
 
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 // Intel 8237
 namespace
@@ -78,6 +79,7 @@ namespace
 struct DMA::Impl : IOPeripheral
 {
     Memory& memory;
+    std::shared_ptr<spdlog::logger> logger;
 
     struct Channel {
         uint8_t mode{};
@@ -91,7 +93,7 @@ struct DMA::Impl : IOPeripheral
     uint8_t status{};
     bool flipflop{};
 
-    Impl(Memory& memory) : memory(memory) { }
+    Impl(IO& io, Memory& memory);
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -102,13 +104,8 @@ struct DMA::Impl : IOPeripheral
 };
 
 DMA::DMA(IO& io, Memory& memory)
-    : impl(std::make_unique<Impl>(memory))
+    : impl(std::make_unique<Impl>(io, memory))
 {
-    io.AddPeripheral(io::Base, 16, *impl);
-    io.AddPeripheral(io::Ch0_PageAddr, 1, *impl);
-    io.AddPeripheral(io::Ch1_PageAddr, 1, *impl);
-    io.AddPeripheral(io::Ch2_PageAddr, 1, *impl);
-    io.AddPeripheral(io::Ch3_PageAddr, 1, *impl);
 }
 
 DMA::~DMA() = default;
@@ -123,6 +120,17 @@ DMA::Transfer DMA::InitiateTransfer(int ch_num)
     return DMA::Transfer{ ch_num, *impl };
 }
 
+DMA::Impl::Impl(IO& io, Memory& memory)
+    : memory(memory)
+    , logger(spdlog::stderr_color_st("dma"))
+{
+    io.AddPeripheral(io::Base, 16, *this);
+    io.AddPeripheral(io::Ch0_PageAddr, 1, *this);
+    io.AddPeripheral(io::Ch1_PageAddr, 1, *this);
+    io.AddPeripheral(io::Ch2_PageAddr, 1, *this);
+    io.AddPeripheral(io::Ch3_PageAddr, 1, *this);
+}
+
 void DMA::Impl::Reset()
 {
     std::fill(channel.begin(), channel.end(), Channel{});
@@ -133,7 +141,7 @@ void DMA::Impl::Reset()
 
 void DMA::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("dma: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
     switch(port) {
         case io::MasterClear_Write:
             Reset();
@@ -187,32 +195,32 @@ size_t DMA::Transfer::GetTotalLength()
 
 size_t DMA::Transfer::WriteFromPeripheral(uint16_t offset, std::span<const uint8_t> data)
 {
-    spdlog::info("dma-ch{}: write data from periphal, offset {}, length {}", ch_num, offset, data.size());
+    impl.logger->info("ch{}: write data from periphal, offset {}, length {}", ch_num, offset, data.size());
     if (impl.mask & (1 << ch_num)) {
-        spdlog::error("dma-ch{}: ignoring write data from periphal, channel is masked", ch_num);
+        impl.logger->error("ch{}: ignoring write data from periphal, channel is masked", ch_num);
         return 0;
     }
 
     auto& ch = impl.channel[ch_num];
     const auto transfer = ch.mode & mode::TransferMask;
     if (transfer != mode::WriteTransfer && transfer != mode::VerifyTransfer) {
-        spdlog::error("dma-ch{}: ignoring write data from periphal: channel not set for write/verify transfer ({})", ch_num, transfer);
+        impl.logger->error("ch{}: ignoring write data from periphal: channel not set for write/verify transfer ({})", ch_num, transfer);
         return 0;
     }
     if ((ch.mode & (mode::AutoInit | mode::Reverse)) != 0) {
-        spdlog::error("dma-ch{}: ignoring write data from periphal: unsupported mode {:x}", ch_num, ch.mode);
+        impl.logger->error("ch{}: ignoring write data from periphal: unsupported mode {:x}", ch_num, ch.mode);
         return 0;
     }
 
     const auto total_length = GetTotalLength();
     if (offset + data.size() > total_length) {
-        spdlog::error("dma-ch{}: ignoring write data from periphal: attempt to write beyond buffer (needed {}, have {})", ch_num, offset + data.size(), total_length);
+        impl.logger->error("ch{}: ignoring write data from periphal: attempt to write beyond buffer (needed {}, have {})", ch_num, offset + data.size(), total_length);
         return 0;
     }
 
     if (transfer == mode::WriteTransfer) {
         const auto address = ch.address + offset;
-        spdlog::debug("dma-ch{}: write data from periphal, length {} to address {:x}", ch_num, data.size(), address);
+        impl.logger->debug("ch{}: write data from periphal, length {} to address {:x}", ch_num, data.size(), address);
         for(size_t n = 0; n < data.size(); ++n) {
             impl.memory.WriteByte(address + n, data[n]);
         }
@@ -228,12 +236,12 @@ void DMA::Transfer::Complete()
 
 void DMA::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("dma: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint8_t DMA::Impl::In8(io_port port)
 {
-    spdlog::info("dma: in8({:x})", port);
+    logger->info("in8({:x})", port);
     switch(port) {
         case io::Status_Read: {
             const auto v = status;
@@ -246,6 +254,6 @@ uint8_t DMA::Impl::In8(io_port port)
 
 uint16_t DMA::Impl::In16(io_port port)
 {
-    spdlog::info("dma: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }

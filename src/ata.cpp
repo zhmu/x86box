@@ -2,6 +2,7 @@
 #include "imageprovider.h"
 
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -119,6 +120,8 @@ namespace
 struct ATA::Impl : IOPeripheral
 {
     ImageProvider& imageProvider;
+    std::shared_ptr<spdlog::logger> logger;
+
     Impl(ImageProvider& imageProvider);
     void Reset();
 
@@ -164,6 +167,7 @@ void ATA::Reset()
 
 ATA::Impl::Impl(ImageProvider& imageProvider)
     : imageProvider(imageProvider)
+    , logger(spdlog::stderr_color_st("ata"))
 {
     // dd if=/dev/zero of=/tmp/hdd.img bs=512 count=62730
 }
@@ -186,7 +190,7 @@ void ATA::Impl::Reset()
 
 void ATA::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("ata: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
     switch (port) {
         case io::Data:
             if (transferMode == TransferMode::HostToPeripheral && sector_data_offset < sector_data.size()) {
@@ -194,10 +198,10 @@ void ATA::Impl::Out8(io_port port, uint8_t val)
                 ++sector_data_offset;
 
                 if (sector_data_offset == sector_data.size()) {
-                    spdlog::warn("ata: out8: Sector completed");
+                    logger->warn("out8: Sector completed");
 
                     if (imageProvider.Write(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
-                        spdlog::error("ata: write error!!!");
+                        logger->critical("write error!!!");
                     }
 
                     --sectors_left;
@@ -209,7 +213,7 @@ void ATA::Impl::Out8(io_port port, uint8_t val)
                     }
                 }
             } else {
-                spdlog::error("ata: out8: Data, but no data needed");
+                logger->error("out8: Data, but no data needed");
             }
             break;
         case io::Feature_Write:
@@ -235,30 +239,30 @@ void ATA::Impl::Out8(io_port port, uint8_t val)
             ExecuteCommand(val);
             break;
         default:
-            spdlog::info("ata: out8: unknown {:x} = {:x}", port, val);
+            logger->info("out8: unknown {:x} = {:x}", port, val);
             break;
     }
 }
 
 uint8_t ATA::Impl::In8(io_port port)
 {
-    spdlog::info("ata: in8({:x})", port);
+    logger->info("in8({:x})", port);
     switch (port)
     {
         case io::Data: {
             if (transferMode == TransferMode::PeripheralToHost && sector_data_offset < sector_data.size()) {
                 const auto data = sector_data[sector_data_offset];
                 ++sector_data_offset;
-                spdlog::debug("ata: in8: Data ({:x})", data);
+                logger->debug("in8: Data ({:x})", data);
 
                 if (sector_data_offset == sector_data.size()) {
-                    spdlog::warn("ata: in8: Sector completed");
+                    logger->warn("in8: Sector completed");
 
                     --sectors_left;
                     if (sectors_left > 0) {
                         ++current_lba;
                         if (imageProvider.Read(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
-                            spdlog::error("ata: read error!!!");
+                            logger->critical("read error!!!");
                             std::fill(sector_data.begin(), sector_data.end(), 0xff);
                         }
                         sector_data_offset = 0;
@@ -269,27 +273,27 @@ uint8_t ATA::Impl::In8(io_port port)
 
                 return data;
             } else {
-                spdlog::error("ata: in8: Data, but no data available");
+                logger->error("in8: Data, but no data available");
             }
             break;
         }
         case io::Error_Read:
-            spdlog::info("ata: in8: Error");
+            logger->info("in8: Error");
             break;
         case io::SectorCount:
-            spdlog::info("ata: in8: SectorCount");
+            logger->info("in8: SectorCount");
             break;
         case io::SectorNumber:
-            spdlog::info("ata: in8: SectorNumber");
+            logger->info("in8: SectorNumber");
             break;
         case io::CylinderLow:
-            spdlog::info("ata: in8: CylinderLow");
+            logger->info("in8: CylinderLow");
             break;
         case io::CylinderHigh:
-            spdlog::info("ata: in8: CylinderHigh");
+            logger->info("in8: CylinderHigh");
             break;
         case io::DriveHead:
-            spdlog::info("ata: in8: Drivehead");
+            logger->info("in8: Drivehead");
             break;
         case io::AltStatus: {
             uint8_t status = 0;
@@ -298,7 +302,7 @@ uint8_t ATA::Impl::In8(io_port port)
                 status |= status::DataRequest;
             if (error != 0)
                 status |= status::Error;
-            spdlog::info("ata: in8: AltStatus {:x}", status);
+            logger->info("in8: AltStatus {:x}", status);
             return status;
         }
     }
@@ -307,12 +311,12 @@ uint8_t ATA::Impl::In8(io_port port)
 
 void ATA::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("ata: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint16_t ATA::Impl::In16(io_port port)
 {
-    spdlog::info("ata: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }
 
@@ -320,15 +324,15 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
 {
     switch(cmd) {
         case command::ReadSectors: {
-            spdlog::info("ata: command: Read Sectors ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+            logger->info("command: Read Sectors ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
 
 
             current_lba = CHStoLBA(cylinder, head, sector_nr);
 
-            spdlog::info("ata: read from c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
+            logger->info("read from c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
             if (imageProvider.Read(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
-                spdlog::error("ata: read error!!!");
+                logger->critical("read error!!!");
                 std::fill(sector_data.begin(), sector_data.end(), 0xff);
             }
             sector_data_offset = 0;
@@ -338,16 +342,16 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             break;
         }
         case command::ReadSectorsWithVerify: {
-            spdlog::info("ata: command: Read Sectors With Verify ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+            logger->info("command: Read Sectors With Verify ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
             error = 0;
             break;
         }
         case command::WriteSectors: {
-            spdlog::info("ata: command: Write Sectors ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+            logger->info("command: Write Sectors ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
 
-            spdlog::info("ata: read from c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
+            logger->info("read from c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
             current_lba = CHStoLBA(cylinder, head, sector_nr);
 
             sector_data_offset = 0;
@@ -357,7 +361,7 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             break;
         }
         case command::Identify: {
-            spdlog::info("ata: command: Identify ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+            logger->info("command: Identify ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
             Identify id{};
             id.general_config = (1 << 15);
@@ -387,7 +391,7 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             break;
         }
         case command::SetMultipleMode: {
-            spdlog::info("ata: command: Set Multiple Mode ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+            logger->info("command: Set Multiple Mode ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
             if (sector_count == 0 || sector_count == 1)  {
                 error = 0;
@@ -397,12 +401,12 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             break;
         }
         case command::SetFeatures: {
-            spdlog::info("ata: command: Set Features ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+            logger->info("command: Set Features ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
             break;
         }
         default:
-            spdlog::warn("ata: unsupported command {:x}, device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
+            logger->warn("unsupported command {:x}, device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
             error = error::AbortedCommand;
             break;

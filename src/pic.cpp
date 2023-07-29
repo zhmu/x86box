@@ -3,6 +3,7 @@
 #include <bit>
 
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 namespace
 {
@@ -39,6 +40,8 @@ namespace
 
 struct PIC::Impl : IOPeripheral
 {
+    std::shared_ptr<spdlog::logger> logger;
+
     int irq_base = 0;
     int init_stage = -1;
     bool expect_icw3{};
@@ -48,6 +51,7 @@ struct PIC::Impl : IOPeripheral
     uint8_t isr{};
     uint8_t imr{0xff};
 
+    Impl(IO& io);
     void AssertIRQ(int num);
     std::optional<int> DequeuePendingIRQ();
 
@@ -58,9 +62,8 @@ struct PIC::Impl : IOPeripheral
 };
 
 PIC::PIC(IO& io)
-    : impl(std::make_unique<Impl>())
+    : impl(std::make_unique<Impl>(io))
 {
-    io.AddPeripheral(io::Base, 2, *impl);
 }
 
 PIC::~PIC() = default;
@@ -84,28 +87,34 @@ std::optional<int> PIC::DequeuePendingIRQ()
     return impl->DequeuePendingIRQ();
 }
 
+PIC::Impl::Impl(IO& io)
+    : logger(spdlog::stderr_color_st("pic"))
+{
+    io.AddPeripheral(io::Base, 2, *this);
+}
+
 void PIC::Impl::Out8(io_port port, uint8_t val)
 {
     const auto handleICW4 = [&]() {
-        spdlog::info("pic: icw4 {:x}", val);
+        logger->info("icw4 {:x}", val);
         if (val & icw4::AEOI)
-            spdlog::error("pic: Auto EOI not implemented");
+            logger->critical("Auto EOI not implemented");
         init_stage = -1;
     };
 
-    spdlog::info("pic: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
     switch(port) {
         case io::Command:
             if (val & icw1::ON) {
-                spdlog::info("pic: initialization {:x}", val);
+                logger->info("initialization {:x}", val);
                 expect_icw3 = (val & icw1::SNGL) == 0;
                 expect_icw4 = (val & icw1::IC4) != 0;
                 init_stage = 0;
             } else {
-                spdlog::info("pic: command {:x}", val);
+                logger->info("command {:x}", val);
                 if (val & ocw2::EOI) {
                     auto irq = std::countr_zero(isr);
-                    spdlog::info("pic: eoi, current active irq {}", irq);
+                    logger->info("eoi, current active irq {}", irq);
                     isr &= ~(1 << irq);
                 }
             }
@@ -113,11 +122,11 @@ void PIC::Impl::Out8(io_port port, uint8_t val)
         case io::Data:
             switch(init_stage) {
                 case -1: // not initializing
-                    spdlog::info("pic: mask {:x}", val);
+                    logger->info("mask {:x}", val);
                     imr = val;
                     break;
                 case 0: // ICW2
-                    spdlog::info("pic: icw2 {:x}", val);
+                    logger->info("icw2 {:x}", val);
                     irq_base = val;
                     if (!expect_icw3 && !expect_icw4)
                         init_stage = -1;
@@ -126,7 +135,7 @@ void PIC::Impl::Out8(io_port port, uint8_t val)
                     break;
                 case 1: // ICW3/ICW4
                     if (expect_icw3) {
-                        spdlog::info("pic: icw3 {:x}", val);
+                        logger->info("icw3 {:x}", val);
                         if (expect_icw4)
                             ++init_stage;
                         else
@@ -146,19 +155,19 @@ void PIC::Impl::Out8(io_port port, uint8_t val)
 
 void PIC::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("pic: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint8_t PIC::Impl::In8(io_port port)
 {
-    spdlog::info("pic: in16({:x})", port);
+    logger->info("in16({:x})", port);
     if (port == io::Data) return imr;
     return 0;
 }
 
 uint16_t PIC::Impl::In16(io_port port)
 {
-    spdlog::info("pic: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }
 
@@ -166,7 +175,7 @@ void PIC::Impl::AssertIRQ(int num)
 {
     assert(num >= 0 && num < 7);
     irr |= (1 << num);
-    spdlog::info("pic: assertIrq {:x} -> irr {:x}", num, irr);
+    logger->info("assertIrq {:x} -> irr {:x}", num, irr);
 }
  
  std::optional<int> PIC::Impl::DequeuePendingIRQ()
@@ -176,7 +185,7 @@ void PIC::Impl::AssertIRQ(int num)
 
     auto irq = std::countr_zero(pendingIrqs);
 
-    spdlog::info("pic: irr {:x} imr {:x} -> irq {:x}", irr, imr, irq);
+    logger->info("irr {:x} imr {:x} -> irq {:x}", irr, imr, irq);
 
     irr &= ~(1 << irq);
     isr |= (1 << irq);

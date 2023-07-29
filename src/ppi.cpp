@@ -3,6 +3,7 @@
 #include "pit.h"
 
 #include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 // Intel 8255
 namespace
@@ -40,13 +41,14 @@ namespace
 struct PPI::Impl : IOPeripheral
 {
     PIT& pit;
+    std::shared_ptr<spdlog::logger> logger;
 
     uint8_t controlReg{};
     uint8_t selectedSwitchReg{};
     uint8_t switchReg{0b0000'0000};
     uint8_t sw{0b0000'0000};
 
-    Impl(PIT& pit) : pit(pit) { }
+    Impl(IO& io, PIT& pit);
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -55,11 +57,8 @@ struct PPI::Impl : IOPeripheral
 };
 
 PPI::PPI(IO& io, PIT& pit)
-    : impl(std::make_unique<Impl>(pit))
+    : impl(std::make_unique<Impl>(io, pit))
 {
-    io.AddPeripheral(io::Control, 1, *impl);
-    io.AddPeripheral(io::Switch, 1, *impl);
-    io.AddPeripheral(io::NMIMask, 1, *impl);
 }
 
 PPI::~PPI() = default;
@@ -68,9 +67,18 @@ void PPI::Reset()
 {
 }
 
+PPI::Impl::Impl(IO& io, PIT& pit)
+    : pit(pit)
+    , logger(spdlog::stderr_color_st("ppi"))
+{
+    io.AddPeripheral(io::Control, 1, *this);
+    io.AddPeripheral(io::Switch, 1, *this);
+    io.AddPeripheral(io::NMIMask, 1, *this);
+}
+
 void PPI::Impl::Out8(io_port port, uint8_t val)
 {
-    spdlog::info("ppi: out8({:x}, {:x})", port, val);
+    logger->info("out8({:x}, {:x})", port, val);
     switch(port) {
         case io::Control:
             selectedSwitchReg = (val & 2) != 0;
@@ -80,12 +88,12 @@ void PPI::Impl::Out8(io_port port, uint8_t val)
 
 void PPI::Impl::Out16(io_port port, uint16_t val)
 {
-    spdlog::info("ppi: out16({:x}, {:x})", port, val);
+    logger->info("out16({:x}, {:x})", port, val);
 }
 
 uint8_t PPI::Impl::In8(io_port port)
 {
-    spdlog::info("ppi: in8({:x})", port);
+    logger->info("in8({:x})", port);
     switch(port) {
         case io::Control: {
             uint8_t value = controlReg & 0xfe;
@@ -122,6 +130,6 @@ uint8_t PPI::Impl::In8(io_port port)
 
 uint16_t PPI::Impl::In16(io_port port)
 {
-    spdlog::info("ppi: in16({:x})", port);
+    logger->info("in16({:x})", port);
     return 0;
 }

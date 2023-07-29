@@ -2,7 +2,7 @@
 #define __IO_H__
 
 #include <cstdint>
-#include <vector>
+#include <memory>
 
 using io_port = uint16_t;
 
@@ -14,26 +14,14 @@ struct IOPeripheral
     virtual uint16_t In16(io_port port) = 0;
 };
 
-class IO
+class IO final
 {
-    struct Peripheral
-    {
-        const io_port base;
-        const uint16_t length;
-        IOPeripheral& peripheral;
-
-        bool Matches(io_port port) const {
-            return port >= base && port < base + length;
-        }
-    };
-    IOPeripheral* FindPeripheral(const io_port addr);
-
-    std::vector<Peripheral> peripherals;
+    struct Impl;
+    std::unique_ptr<Impl> impl;
 
 public:
     IO();
     ~IO();
-
     void Reset();
     void AddPeripheral(io_port base, uint16_t length, IOPeripheral& peripheral);
 
