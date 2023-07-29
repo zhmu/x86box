@@ -18,4 +18,5 @@ class FDC final
     ~FDC();
 
     void Reset();
+    void NotifyImageChanged();
 };

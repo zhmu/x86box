@@ -124,6 +124,11 @@ namespace
         constexpr inline uint8_t Configure = 19;
     }
 
+    namespace dir
+    {
+        constexpr inline uint8_t DiskChanged = (0b1 << 7); // DSKCHG
+    }
+
     size_t DetermineNumberOfInputBytes(uint8_t cmd)
     {
         switch(cmd & 0b00011111)
@@ -160,6 +165,7 @@ struct FDC::Impl : IOPeripheral
     size_t fifoReadBytesAvailable = 0;
     uint8_t st0 = 0;
     uint8_t current_track = 0;
+    bool disk_changed{};
 
     enum class State {
         Idle,
@@ -200,6 +206,7 @@ void FDC::Impl::Reset()
     fifoReadBytesAvailable = 0;
     st0 = st0::InterruptCode1 | st0::InterruptCode0;
     current_track = 0;
+    disk_changed = false;
 }
 
 void FDC::Impl::Out8(io_port port, uint8_t val)
@@ -288,6 +295,8 @@ bool FDC::Impl::ExecuteCurrentCommand()
             const auto ds0 = (fifo[1] & 0x1) != 0;
             const auto ncn = fifo[2];
             spdlog::info("fdc: command: seek -> hds {:x} ds1 {} ds0 {} ncn {:x}", hds, ds1, ds0, ncn);
+            // Let's assume any seek clears the 'disk changed' bit...
+            disk_changed = false;
             return true;
         }
     }
@@ -415,6 +424,13 @@ uint8_t FDC::Impl::In8(io_port port)
             }
             return result;
         }
+        case io::DigitalInput_Read: {
+            uint8_t result = 0;
+            if (disk_changed)
+                result |= dir::DiskChanged;
+            spdlog::info("fdc: dir_read ({:x})", result);
+            return result;
+        }
     }
     return 0;
 }
@@ -423,4 +439,9 @@ uint16_t FDC::Impl::In16(io_port port)
 {
     spdlog::info("fdc: in16({:x})", port);
     return 0;
+}
+
+void FDC::NotifyImageChanged()
+{
+    impl->disk_changed = true;
 }
