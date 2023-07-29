@@ -7,8 +7,7 @@
 
 namespace
 {
-    constexpr inline auto picFrequency = 1'193'182; // Hz
-    constexpr inline auto picTickInNs{1'000'000'000 / picFrequency };
+    constexpr inline auto pitFrequency = 1'193'182; // Hz
 
     namespace io
     {
@@ -38,7 +37,9 @@ struct PIT::Impl : IOPeripheral
         int prev_mode = -1;
         uint8_t latch{};
         bool active{};
-        bool prev_output{}; // XXX HACK
+        bool current_output{};
+        // When was the count last set?
+        std::chrono::steady_clock::time_point count_time{};
 
         enum class State {
             LoByte,
@@ -51,14 +52,12 @@ struct PIT::Impl : IOPeripheral
     std::array<Channel, 3> channel;
     uint8_t control{};
 
-    std::chrono::steady_clock::time_point last_count_tp;
-
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
     uint16_t In16(io_port port) override;
 
-    bool TickChannel(size_t ch_num);
+    bool TickChannel(size_t ch_num, std::chrono::steady_clock::time_point now);
 };
 
 PIT::PIT(IO& io)
@@ -72,28 +71,22 @@ PIT::~PIT() = default;
 void PIT::Reset()
 {
     impl->control = 0;
-    impl->last_count_tp = std::chrono::steady_clock::now();;
     std::fill(impl->channel.begin(), impl->channel.end(), Impl::Channel{});
 }
 
  bool PIT::Tick()
  {
     const auto now = std::chrono::steady_clock::now();;
-    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - impl->last_count_tp).count();
-    if (elapsed < picTickInNs) {
-        return false;
-    }
-    impl->last_count_tp = now;
 
     bool signal_irq = false;
     for(size_t ch_num = 0; ch_num < impl->channel.size(); ++ch_num)
     {
-        const auto output = impl->TickChannel(ch_num);
+        const auto output = impl->TickChannel(ch_num, now);
         // Only signal IRQ0 if the output from channel 0 changes
-        if (ch_num == 0 && impl->channel[ch_num].prev_output != output) {
+        if (ch_num == 0 && !impl->channel[ch_num].current_output && output) {
             signal_irq = output;
         }
-        impl->channel[ch_num].prev_output = output;
+        impl->channel[ch_num].current_output = output;
     }
 
     return signal_irq;
@@ -145,10 +138,12 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
                 case Channel::State::HiByte:
                     ch.reload = static_cast<uint16_t>(val) << 8;
                     ch.active = true;
+                    ch.count_time = std::chrono::steady_clock::now();;
                     break;
                 case Channel::State::LoAndHi2:
                     ch.reload = (ch.reload & 0x00ff) | (static_cast<uint16_t>(val) << 8);
                     ch.active = true;
+                    ch.count_time = std::chrono::steady_clock::now();;
                     break;
                 case Channel::State::LoAndHi1:
                     ch.reload = (ch.reload & 0xff00) | val;
@@ -157,6 +152,7 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
                 case Channel::State::LoByte:
                     ch.reload = val;
                     ch.active = true;
+                    ch.count_time = std::chrono::steady_clock::now();;
                     ch.state = Channel::State::LoAndHi1;
                     break;
             }
@@ -197,11 +193,14 @@ uint16_t PIT::Impl::In16(io_port port)
     return 0;
 }
 
-bool PIT::Impl::TickChannel(size_t ch_num)
+bool PIT::Impl::TickChannel(size_t ch_num, std::chrono::steady_clock::time_point now)
 {
     auto& ch = channel[ch_num];
     if (!ch.active) return false;
 
+    // Compute current channel count - we need to go from absolute delta (in ns) to PIT counts
+    const uint64_t count =
+        (std::chrono::duration_cast<std::chrono::nanoseconds>(now - ch.count_time).count() * pitFrequency) / 1'000'000'000;
     bool output = false;
     switch(ch.mode)
     {
@@ -219,14 +218,13 @@ bool PIT::Impl::TickChannel(size_t ch_num)
                 spdlog::error("pit: channel {}: 'rate generator' mode not implemented", ch_num);
             break;
         case 3: // Square Wave Generator
-        case 7:
-            ch.counter = (ch.counter + 1) % ch.reload;
-            if (ch.reload % 2 == 0) /* even */ {
-                output = (ch.counter < ch.reload / 2);
-            } else /*  odd */ {
-                output = (ch.counter >= ch.reload / 2);
-            }
+        case 7: {
+            // Datasheet, mode 3 implementation states that for ODD counts:
+            // "OUT will be high for (N + 1) / 2 counts and low for (N - 1) / 2 counts"
+            // TODO: Figure out whether EVEN counts need special handling here...
+            output = (count % ch.reload) < ((ch.reload + 1) / 2);
             break;
+        }
         case 4: // Software Triggered Strobe
             if (ch.prev_mode != ch.mode)
                 spdlog::error("pit: channel {}: 'software triggered strobe' mode not implemented", ch_num);
@@ -243,5 +241,5 @@ bool PIT::Impl::TickChannel(size_t ch_num)
 
 bool PIT::GetTimer2Output() const
 {
-    return impl->channel[2].prev_output;
+    return impl->channel[2].current_output;
 }
