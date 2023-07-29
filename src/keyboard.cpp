@@ -5,6 +5,8 @@
 #include "io.h"
 #include "hostio.h"
 
+#include <deque>
+
 #include "spdlog/spdlog.h"
 
 namespace
@@ -22,7 +24,7 @@ namespace
 struct Keyboard::Impl : IOPeripheral
 {
     HostIO& hostio;
-    uint16_t scancode = 0;
+    std::deque<uint8_t> scancode;
 
     Impl(IO&, HostIO&);
 
@@ -48,12 +50,16 @@ Keyboard::~Keyboard() = default;
 
 void Keyboard::Reset()
 {
-    impl->scancode = 0;
+    impl->scancode.clear();
 }
 
 void Keyboard::EnqueueScancode(uint16_t scancode)
 {
-    impl->scancode = scancode;
+    spdlog::info("keyboard: enqueue scancode {:x}", scancode);
+    if (scancode >= 0x100) {
+        impl->scancode.push_back(scancode >> 8);
+    }
+    impl->scancode.push_back(scancode & 0xff);
 }
 
 void Keyboard::Impl::Out8(io_port port, uint8_t val)
@@ -71,12 +77,13 @@ uint8_t Keyboard::Impl::In8(io_port port)
     spdlog::info("keyboard: in8({:x})", port);
     switch(port) {
         case io::Data: {
-            if (const auto value = scancode >> 8; value != 0) {
-                scancode = scancode >> 8;
-                return value;
+            if (scancode.empty()) {
+                spdlog::warn("keyboard: reading data port, yet buffer is empty");
+                return 0;
             }
-            const auto v = scancode;
-            scancode = 0;
+            const auto v = scancode.front();
+            scancode.pop_front();
+            spdlog::info("keyboard-in: {:x}", v);
             return v;
         }
     }

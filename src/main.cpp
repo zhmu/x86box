@@ -58,6 +58,7 @@ int main(int argc, char** argv)
     prog.add_argument("--rom")
         .help("use option rom");
     prog.add_argument("--fd0")
+        .append()
         .help("use specified image for floppy disk 0");
     prog.add_argument("--hd0")
         .help("use specified image for hard disk 0");
@@ -93,6 +94,7 @@ int main(int argc, char** argv)
     if (prog["disassemble"] == true)
         disassembler = std::make_unique<Disassembler>();
 
+
     memory->Reset();
     io->Reset();
     x86cpu->Reset();
@@ -110,18 +112,45 @@ int main(int argc, char** argv)
         //"../../images/ide_xtl_padded.bin"
         load_rom(*memory, *rom, [](size_t length) { return 0xe8000; });
     }
-    if (auto fd0 = prog.present("--fd0"); fd0 && !imageLibrary->SetImage(Image::Floppy0, fd0->c_str())) {
-        std::cerr << "Unable to attach floppy disk image '" << *fd0 << "'\n";
-        return -1;
-    }
+
     if (auto hd0 = prog.present("--hd0"); hd0 && !imageLibrary->SetImage(Image::Harddisk0, hd0->c_str())) {
         std::cerr << "Unable to attach hard disk image '" << *hd0 << "'\n";
         return -1;
     }
 
+    size_t fd0image_current_index = 0;
+    const auto fd0images = prog.get<std::vector<std::string>>("--fd0");
+    if (!fd0images.empty() && !imageLibrary->SetImage(Image::Floppy0, fd0images.front().c_str())) {
+        std::cerr << "Unable to attach hard disk image '" << fd0images.front() << "'\n";
+        return -1;
+    }
+
+    int num_zero_instr = 0;
     unsigned int n = 0, m = 0;
     bool disassembler_active = false;
-    while (!hostio->IsQuitting()) {
+
+    bool running = true;
+    while(running) {
+        if (const auto event = hostio->GetPendingEvent(); event) {
+            switch(*event) {
+                case HostIO::EventType::Terminate:
+                    running = false;
+                    continue;
+                case HostIO::EventType::ChangeImageFloppy0:
+                    if (fd0images.size() > 1) {
+                        fd0image_current_index = (fd0image_current_index + 1) % fd0images.size();
+                        const auto& fd0image = fd0images[fd0image_current_index];
+                        if (imageLibrary->SetImage(Image::Floppy0, fd0image.c_str())) {
+                            spdlog::info("main: fd0 now uses image '{}'", fd0image);
+                            fdc->NotifyImageChanged();
+                        } else {
+                            spdlog::error("main: unable to use image '{}' for fd0", fd0image);
+                        }
+                    }
+                    break;
+            }
+        }
+
         if (x86cpu->GetState().m_flags & cpu::flag::IF) {
             auto irq = pic->DequeuePendingIRQ();
             if (irq) {
@@ -149,7 +178,10 @@ int main(int argc, char** argv)
             pic->AssertIRQ(0);
         }
 
-        if (const auto scancode = hostio->GetAndClearPendingScanCode()) {
+        while (true) {
+            const auto scancode = hostio->GetAndClearPendingScanCode();
+            if (!scancode)
+                break;
             keyboard->EnqueueScancode(scancode);
             pic->AssertIRQ(1);
         }

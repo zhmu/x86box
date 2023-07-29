@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 
 class HostIO final
 {
@@ -15,10 +16,17 @@ class HostIO final
 
     void Update();
 
-    bool IsQuitting() const;
     void putpixel(unsigned int x, unsigned int y, uint32_t c);
 
     uint16_t GetAndClearPendingScanCode();
+
+    enum class EventType
+    {
+      Terminate,
+      ChangeImageFloppy0,
+    };
+
+    std::optional<EventType> GetPendingEvent();
 };
 
 #endif /* __HOSTIO_H__ */

@@ -128,8 +128,8 @@ struct HostIO::Impl
     SDL_Window* window{};
     SDL_Renderer* renderer{};
     SDL_Texture* texture{};
-    bool quitting = false;
     std::deque<uint16_t> pendingScancodes;
+    std::deque<EventType> pendingEvents;
 };
 
 HostIO::Impl::Impl()
@@ -172,9 +172,13 @@ void HostIO::Update()
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
             case SDL_QUIT:
-                impl->quitting = true;
+                impl->pendingEvents.push_back(EventType::Terminate);
                 break;
 			case SDL_KEYDOWN: {
+				if (event.key.keysym.sym == SDLK_BACKQUOTE && (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL)) ) {
+					impl->pendingEvents.push_back(EventType::ChangeImageFloppy0);
+                    break;
+				}
                 const auto scancode = MapSDLKeycodeToScancodeSet1(event.key.keysym.sym);
                 if (scancode != 0) {
                     impl->pendingScancodes.push_back(scancode);
@@ -201,15 +205,18 @@ void HostIO::putpixel(unsigned int x, unsigned int y, uint32_t c)
     *p = c;
 }
 
-bool HostIO::IsQuitting() const
-{
-    return impl->quitting;
-}
-
 uint16_t HostIO::GetAndClearPendingScanCode()
 {
     if (impl->pendingScancodes.empty()) return 0;
     const auto scancode = impl->pendingScancodes.front();
     impl->pendingScancodes.pop_front();
     return scancode;
+}
+
+std::optional<HostIO::EventType> HostIO::GetPendingEvent()
+{
+    if (impl->pendingEvents.empty()) return {};
+    const auto event = impl->pendingEvents.front();
+    impl->pendingEvents.pop_front();
+    return event;
 }
