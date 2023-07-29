@@ -1823,8 +1823,9 @@ void CPUx86::RunInstruction()
         case 0xdd: /* ESC/5 */
         case 0xde: /* ESC/6 */
         case 0xdf: /* ESC/7 */ {
-            const auto imm = getImm16();
-            spdlog::warn("ignoring unimplemented FPU instruction {:x}", imm);
+            const auto mor = GetModOpRm(m_Memory, m_State);
+            const auto modRm = DecodeModRm(m_Memory, m_State, mor);
+            spdlog::warn("ignoring unimplemented FPU instruction");
             break;
         }
         case 0xe0: /* LOOPNZ Jb */ {
