@@ -52,7 +52,7 @@ struct PIC::Impl : IOPeripheral
     uint8_t imr{0xff};
 
     Impl(IO& io);
-    void AssertIRQ(int num);
+    void AssertIRQ(IRQ num);
     std::optional<int> DequeuePendingIRQ();
 
     void Out8(io_port port, uint8_t val) override;
@@ -77,9 +77,9 @@ void PIC::Reset()
     impl->imr = 0xff;
 }
 
-void PIC::AssertIRQ(int no)
+void PIC::AssertIRQ(PIC::IRQ irq)
 {
-    impl->AssertIRQ(no);
+    impl->AssertIRQ(irq);
 }
 
 std::optional<int> PIC::DequeuePendingIRQ()
@@ -171,9 +171,9 @@ uint16_t PIC::Impl::In16(io_port port)
     return 0;
 }
 
-void PIC::Impl::AssertIRQ(int num)
+void PIC::Impl::AssertIRQ(PIC::IRQ irq)
 {
-    assert(num >= 0 && num < 7);
+    const auto num = static_cast<unsigned int>(irq);
     irr |= (1 << num);
     logger->info("assertIrq {:x} -> irr {:x}", num, irr);
 }

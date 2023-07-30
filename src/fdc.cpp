@@ -13,8 +13,6 @@
 // Intel 82077A
 namespace
 {
-    constexpr inline uint8_t IRQ_FDC = 6;
-
     namespace io
     {
         constexpr inline io_port Base = 0x3f0;
@@ -226,7 +224,7 @@ void FDC::Impl::Out8(io_port port, uint8_t val)
                 // Reset toggled from lo -> hi
                 logger->warn("reset");
                 Reset();
-                pic.AssertIRQ(IRQ_FDC);
+                pic.AssertIRQ(PIC::IRQ::FDC);
             }
             dor = val;
             break;
@@ -245,7 +243,7 @@ void FDC::Impl::Out8(io_port port, uint8_t val)
                         logger->info("executing command {} (fifo contains {} bytes)", fifo[0], fifoWriteOffset);
                         if (ExecuteCurrentCommand()) {
                             logger->info("triggering interrupt upon command completion");
-                            pic.AssertIRQ(IRQ_FDC);
+                            pic.AssertIRQ(PIC::IRQ::FDC);
                         }
                         if (fifoReadBytesAvailable > 0) {
                             state = State::TransmitFifoBytes;

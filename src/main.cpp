@@ -199,7 +199,7 @@ int main(int argc, char** argv)
         }
 
         if (pit->Tick()) {
-            pic->AssertIRQ(0);
+            pic->AssertIRQ(PIC::IRQ::PIT);
         }
 
         while (true) {
@@ -207,7 +207,7 @@ int main(int argc, char** argv)
             if (!scancode)
                 break;
             keyboard->EnqueueScancode(scancode);
-            pic->AssertIRQ(1);
+            pic->AssertIRQ(PIC::IRQ::Keyboard);
         }
     }
     return 0;

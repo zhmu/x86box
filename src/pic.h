@@ -14,7 +14,18 @@ class PIC final
     PIC(IO& io);
     ~PIC();
 
-    void AssertIRQ(int num);
+    enum class IRQ {
+      PIT,
+      Keyboard,
+      Cascade,
+      COM2,
+      COM1,
+      LPT,
+      FDC,
+      LPT1
+    };
+
+    void AssertIRQ(IRQ irq);
 
     std::optional<int> DequeuePendingIRQ();
 
