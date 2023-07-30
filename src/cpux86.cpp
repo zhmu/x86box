@@ -46,8 +46,6 @@ void CPUx86::Reset()
     m_State.m_ds = 0;
     m_State.m_es = 0;
     m_State.m_ss = 0;
-
-    m_State.m_ax = 0x1234;
 }
 
 namespace alu = cpu::alu;
@@ -404,11 +402,10 @@ void CPUx86::RunInstruction()
             RelativeJump8(m_State.m_ip, imm);
     };
 
-    auto todo = []() { spdlog::warn("TODO"); };
     auto invalidOpcode = []() { spdlog::error("invalidOpcode()\n"); std::abort(); };
 
     /*
-     * The Op_... macro's follow the 80386 manual conventions (appendix F page
+     * The Op_... functions follow the 80386 manual conventions (appendix F page
      * 706)
      *
      * The first character contains the addressing method:
@@ -453,12 +450,11 @@ void CPUx86::RunInstruction()
         reg.Store(op(m_State.m_flags, reg.Load(), ReadEA8(m_Memory, m_State, modRm)));
     };
 
-    auto opcode = GetCodeImm8(m_Memory, m_State);
-    spdlog::debug("cs:ip={:04x}:{:04x} opcode {:02x}", m_State.m_cs, m_State.m_ip - 1, opcode);
 
     // Handle prefixes first
     m_State.m_prefix = 0;
     m_State.m_seg_override = {};
+    auto opcode = GetCodeImm8(m_Memory, m_State);
     while(true) {
         if (opcode == 0x26) { /* ES: */
             m_State.m_seg_override = cpu::Segment::ES;
@@ -468,6 +464,8 @@ void CPUx86::RunInstruction()
             m_State.m_seg_override = cpu::Segment::SS;
         } else if (opcode == 0x3e) {/* DS: */
             m_State.m_seg_override = cpu::Segment::DS;
+        } else if (opcode == 0xf0) { /* LOCK */
+            spdlog::critical("cpu: unimplemented prefix 'lock'");
         } else if (opcode == 0xf2) { /* REPNZ */
             m_State.m_prefix |= cpu::State::PREFIX_REPNZ;
         } else if (opcode == 0xf3) { /* REPZ */
@@ -1246,7 +1244,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0x9b: /* WAIT */ {
-            todo(); /* XXX Do we need this? */
+            spdlog::critical("cpu: unimplemented instruction 'wait'"); /* XXX Do we need this? */
             break;
         }
         case 0x9c: /* PUSHF */ {
@@ -1796,7 +1794,7 @@ void CPUx86::RunInstruction()
             if (result) {
                 m_State.m_ax = *result;
             } else {
-                SignalInterrupt(INT_DIV_BY_ZERO);
+                HandleInterrupt(INT_DIV_BY_ZERO);
             }
             break;
         }
@@ -1825,7 +1823,7 @@ void CPUx86::RunInstruction()
         case 0xdf: /* ESC/7 */ {
             const auto mor = GetModOpRm(m_Memory, m_State);
             const auto modRm = DecodeModRm(m_Memory, m_State, mor);
-            spdlog::warn("ignoring unimplemented FPU instruction");
+            spdlog::warn("cpu: ignoring unimplemented FPU instruction");
             break;
         }
         case 0xe0: /* LOOPNZ Jb */ {
@@ -1906,7 +1904,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xf0: /* LOCK */ {
-            todo(); /* XXX Should we? */
+            Unreachable();
             break;
         }
         case 0xf1: /* -- */ {
@@ -1919,7 +1917,7 @@ void CPUx86::RunInstruction()
             break;
         }
         case 0xf4: /* HLT */ {
-            todo();
+            spdlog::critical("cpu: unimplemented instruction 'hlt'");
             break;
         }
         case 0xf5: /* CMC */ {
@@ -1953,11 +1951,11 @@ void CPUx86::RunInstruction()
                     break;
                 case 6: /* DIV */
                     if (alu::Div8(m_State.m_ax, ReadEA8(m_Memory, m_State, modRm)))
-                        SignalInterrupt(INT_DIV_BY_ZERO);
+                        HandleInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
                     if (alu::Idiv8(m_State.m_ax, m_State.m_dx, ReadEA8(m_Memory, m_State, modRm)))
-                        SignalInterrupt(INT_DIV_BY_ZERO);
+                        HandleInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
             break;
@@ -1989,11 +1987,11 @@ void CPUx86::RunInstruction()
                     break;
                 case 6: /* DIV */
                     if (alu::Div16(m_State.m_ax, m_State.m_dx, ReadEA16(m_Memory, m_State, modRm)))
-                        SignalInterrupt(INT_DIV_BY_ZERO);
+                        HandleInterrupt(INT_DIV_BY_ZERO);
                     break;
                 case 7: /* IDIV */
                     if (alu::Idiv16(m_State.m_ax, m_State.m_dx, ReadEA16(m_Memory, m_State, modRm)))
-                        SignalInterrupt(INT_DIV_BY_ZERO);
+                        HandleInterrupt(INT_DIV_BY_ZERO);
                     break;
             }
             break;
@@ -2084,27 +2082,6 @@ void CPUx86::RunInstruction()
 CPUx86::addr_t CPUx86::MakeAddr(uint16_t seg, uint16_t off)
 {
     return ((addr_t)seg << 4) + (addr_t)off;
-}
-
-namespace cpu
-{
-
-void Dump(const State& st)
-{
-    spdlog::debug( "  ax={:04x} bx={:04x} cx={:04x} dx={:04x} si={:04x} di={:04x} bp={:04x} flags={:04x}", st.m_ax,
-        st.m_bx, st.m_cx, st.m_dx, st.m_si, st.m_di, st.m_bp, st.m_flags);
-    spdlog::debug("  cs:ip={:04x}:{:04x} ds={:04x} es={:04x} ss:sp={:04x}:{:04x}", st.m_cs, st.m_ip, st.m_ds, st.m_es, st.m_ss,
-        st.m_sp);
-}
-
-}
-
-void CPUx86::Dump() { cpu::Dump(m_State); }
-
-void CPUx86::SignalInterrupt(uint8_t no)
-{
-    spdlog::error("SignalInterrupt(): no {:x}", no);
-    std::abort(); // TODO
 }
 
 void CPUx86::HandleInterrupt(uint8_t no)

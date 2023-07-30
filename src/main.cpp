@@ -22,8 +22,11 @@
 #include "argparse/argparse.hpp"
 #include "spdlog/spdlog.h"
 #include "spdlog/cfg/env.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 namespace {
+
+std::shared_ptr<spdlog::logger> trace_logger;
 
 constexpr inline auto emulatorCyclesPriorToUpdate = 500;
 
@@ -67,6 +70,14 @@ CPUx86::addr_t decode_address(const std::string& s)
         throw std::runtime_error(std::string("unable to parse integer '") + s + "'");
     }
     return result;
+}
+
+void LogState(const cpu::State& st)
+{
+    trace_logger->info("ax={:04x} bx={:04x} cx={:04x} dx={:04x} si={:04x} di={:04x} bp={:04x} flags={:04x}", st.m_ax,
+        st.m_bx, st.m_cx, st.m_dx, st.m_si, st.m_di, st.m_bp, st.m_flags);
+    trace_logger->info("cs:ip={:04x}:{:04x} ds={:04x} es={:04x} ss:sp={:04x}:{:04x}", st.m_cs, st.m_ip, st.m_ds, st.m_es, st.m_ss,
+        st.m_sp);
 }
 
 }
@@ -143,6 +154,8 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    trace_logger = spdlog::stderr_color_st("trace");
+
     std::optional<CPUx86::addr_t> disassemble_address;
     if (auto disasm = prog.present("--disassemble"); disasm) {
         disassemble_address = decode_address(*disasm);
@@ -185,11 +198,12 @@ int main(int argc, char** argv)
 
         if (disassembler) {
             const auto s = disassembler->Disassemble(*memory, x86cpu->GetState());
-            std::cout << s << '\n';
+            trace_logger->info(s);
         }
+
         x86cpu->RunInstruction();
         if (disassembler) {
-            x86cpu->Dump();
+            LogState(x86cpu->GetState());
         }
 
         if (++emulatorCycle >= emulatorCyclesPriorToUpdate) {

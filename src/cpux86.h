@@ -16,15 +16,8 @@ class CPUx86
     CPUx86(Memory& oMemory, IO& oIO);
     ~CPUx86();
 
-    /*! \brief Fetches and executes the next instruction
-     *  \returns Number of clock cycles used
-     */
     void RunInstruction();
-
-    //! \brief Resets the CPU
     void Reset();
-
-    void Dump();
 
     const cpu::State& GetState() const { return m_State; }
 
@@ -33,8 +26,6 @@ class CPUx86
     void HandleInterrupt(uint8_t no);
 
   private:
-    void SignalInterrupt(uint8_t no);
-
     Memory& m_Memory;
     IO& m_IO;
     cpu::State m_State;
