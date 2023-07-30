@@ -35,6 +35,20 @@ namespace
         static constexpr inline io_port InputStatus1_Read = 0x3da;
         static constexpr inline io_port FeatureControl_Write = 0x3da;
     }
+
+    constexpr uint32_t SwapRGBtoBGR(uint32_t v)
+    {
+        return (v & 0x00ff00) | ((v & 0xff) << 16) | ((v & 0xff0000) >> 16);
+    }
+    static_assert(SwapRGBtoBGR(0x123456) == 0x563412);
+
+    // https://moddingwiki.shikadi.net/wiki/B800_Text
+    constexpr std::array<uint32_t, 16> egaPalette{
+        SwapRGBtoBGR(0x000000), SwapRGBtoBGR(0x0000aa), SwapRGBtoBGR(0x00aa00), SwapRGBtoBGR(0x00aaaa),
+        SwapRGBtoBGR(0xaa0000), SwapRGBtoBGR(0xaa00aa), SwapRGBtoBGR(0xaa5500), SwapRGBtoBGR(0xaaaaaa),
+        SwapRGBtoBGR(0x555555), SwapRGBtoBGR(0x5555ff), SwapRGBtoBGR(0x55ff55), SwapRGBtoBGR(0x55ffff),
+        SwapRGBtoBGR(0xff5555), SwapRGBtoBGR(0xff55ff), SwapRGBtoBGR(0xffff55), SwapRGBtoBGR(0xffffff)
+    };
 }
 
 struct VGA::Impl : XMemoryMapped, IOPeripheral
@@ -75,13 +89,15 @@ void VGA::Impl::Update()
     for (unsigned int y = 0; y < 25; y++)
         for (unsigned int x = 0; x < 80; x++) {
             const auto ch = videomem[160 * y + 2 * x + 0];
-            [[maybe_unused]] const auto cl = videomem[160 * y + 2 * x + 1];
+            const auto cl = videomem[160 * y + 2 * x + 1];
             const auto d = &font_data[ch * 8];
             for (unsigned int j = 0; j < 8; j++)
                 for (unsigned int i = 0; i < 8; i++) {
-                    uint32_t color = 0x00ffffff;
+                    uint32_t color{};
                     if ((d[j] & (1 << (8 - i))) == 0)
-                        color = 0;
+                        color = egaPalette[cl >> 4];
+                    else
+                        color = egaPalette[cl & 0xf];
                     hostio.putpixel(x * 8 + i, y * 8 + j, color);
                 }
         }
