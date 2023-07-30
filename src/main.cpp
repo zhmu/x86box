@@ -96,6 +96,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    spdlog::set_level(spdlog::level::warn);
     spdlog::cfg::load_env_levels();
 
     auto imageLibrary = std::make_unique<ImageLibrary>();
