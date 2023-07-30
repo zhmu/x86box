@@ -98,3 +98,8 @@ uint16_t Keyboard::Impl::In16(io_port port)
     logger->info("in16({:x})", port);
     return 0;
 }
+
+bool Keyboard::IsQueueFilled() const
+{
+    return !impl->scancode.empty();
+}

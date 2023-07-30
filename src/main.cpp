@@ -221,8 +221,8 @@ int main(int argc, char** argv)
             if (!scancode)
                 break;
             keyboard->EnqueueScancode(scancode);
-            pic->AssertIRQ(PIC::IRQ::Keyboard);
         }
+        pic->SetPendingIRQState(PIC::IRQ::Keyboard, keyboard->IsQueueFilled());
     }
     return 0;
 }

@@ -26,6 +26,7 @@ class PIC final
     };
 
     void AssertIRQ(IRQ irq);
+    void SetPendingIRQState(IRQ irq, bool pending);
 
     std::optional<int> DequeuePendingIRQ();
 

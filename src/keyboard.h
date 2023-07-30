@@ -16,6 +16,7 @@ public:
     ~Keyboard();
 
     virtual void Reset();
+    bool IsQueueFilled() const;
     void EnqueueScancode(uint16_t scancode);
 };
 

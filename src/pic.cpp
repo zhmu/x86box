@@ -52,7 +52,7 @@ struct PIC::Impl : IOPeripheral
     uint8_t imr{0xff};
 
     Impl(IO& io);
-    void AssertIRQ(IRQ num);
+    void SetPendingIRQState(IRQ irq, bool pending);
     std::optional<int> DequeuePendingIRQ();
 
     void Out8(io_port port, uint8_t val) override;
@@ -75,11 +75,6 @@ void PIC::Reset()
     impl->expect_icw3 = {};
     impl->expect_icw4 = {};
     impl->imr = 0xff;
-}
-
-void PIC::AssertIRQ(PIC::IRQ irq)
-{
-    impl->AssertIRQ(irq);
 }
 
 std::optional<int> PIC::DequeuePendingIRQ()
@@ -171,11 +166,16 @@ uint16_t PIC::Impl::In16(io_port port)
     return 0;
 }
 
-void PIC::Impl::AssertIRQ(PIC::IRQ irq)
+void PIC::Impl::SetPendingIRQState(PIC::IRQ irq, bool pending)
 {
     const auto num = static_cast<unsigned int>(irq);
-    irr |= (1 << num);
-    logger->info("assertIrq {:x} -> irr {:x}", num, irr);
+    const auto prev_irr = irr;
+    if (pending)
+        irr |= (1 << num);
+    else
+        irr &= ~(1 << num);
+    if (prev_irr != irr)
+        logger->info("SetPendingIRQState({:x}, {}) -> irr {:x} (was {:x})", num, pending ? 1 : 0, irr, prev_irr);
 }
  
  std::optional<int> PIC::Impl::DequeuePendingIRQ()
@@ -191,3 +191,13 @@ void PIC::Impl::AssertIRQ(PIC::IRQ irq)
     isr |= (1 << irq);
     return irq_base + irq;
  }
+
+ void PIC::SetPendingIRQState(IRQ irq, bool pending)
+ {
+    impl->SetPendingIRQState(irq, pending);
+ }
+
+void PIC::AssertIRQ(IRQ irq)
+{
+    SetPendingIRQState(irq, true);
+}
