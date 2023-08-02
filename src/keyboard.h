@@ -4,7 +4,7 @@
 #include <memory>
 
 class HostIO;
-class IO;
+struct IOInterface;
 
 class Keyboard final
 {
@@ -12,7 +12,7 @@ class Keyboard final
     std::unique_ptr<Impl> impl;
 
 public:
-    Keyboard(IO& io, HostIO& hostio);
+    Keyboard(IOInterface& io, HostIO& hostio);
     ~Keyboard();
 
     virtual void Reset();

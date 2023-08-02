@@ -51,31 +51,30 @@ namespace
     };
 }
 
-struct VGA::Impl : XMemoryMapped, IOPeripheral
+struct VGA::Impl : MemoryMappedPeripheral, IOPeripheral
 {
     std::shared_ptr<spdlog::logger> logger;
     HostIO& hostio;
     std::array<uint8_t, VideoMemorySize> videomem{};
 
-    Impl(Memory& memory, IO& io, HostIO& hostio);
+    Impl(MemoryInterface& memory, IOInterface& io, HostIO& hostio);
 
-    uint8_t ReadByte(Memory::Address addr) override;
-    uint16_t ReadWord(Memory::Address addr) override;
+    uint8_t ReadByte(memory::Address addr) override;
+    uint16_t ReadWord(memory::Address addr) override;
 
-    void WriteByte(Memory::Address addr, uint8_t data) override;
-    void WriteWord(Memory::Address addr, uint16_t data) override;
+    void WriteByte(memory::Address addr, uint8_t data) override;
+    void WriteWord(memory::Address addr, uint16_t data) override;
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
     uint16_t In16(io_port port) override;
 
-
     void Update();
 };
 
 
-VGA::Impl::Impl(Memory& memory, IO& io, HostIO& hostio)
+VGA::Impl::Impl(MemoryInterface& memory, IOInterface& io, HostIO& hostio)
     : hostio(hostio)
     , logger(spdlog::stderr_color_st("vga"))
 {
@@ -103,7 +102,7 @@ void VGA::Impl::Update()
         }
 }
 
-VGA::VGA(Memory& memory, IO& io, HostIO& hostio)
+VGA::VGA(MemoryInterface& memory, IOInterface& io, HostIO& hostio)
     : impl(std::make_unique<Impl>(memory, io, hostio))
 {
 }
@@ -115,7 +114,7 @@ void VGA::Reset()
     std::fill(impl->videomem.begin(), impl->videomem.end(), 0);
 }
 
-uint8_t VGA::Impl::ReadByte(Memory::Address addr)
+uint8_t VGA::Impl::ReadByte(memory::Address addr)
 {
     logger->info("read(8) @ 0x{:4x}", addr);
     if (addr >= 0xb8000 && addr <= 0xb8fff) {
@@ -124,7 +123,7 @@ uint8_t VGA::Impl::ReadByte(Memory::Address addr)
     return 0;
 }
 
-uint16_t VGA::Impl::ReadWord(Memory::Address addr)
+uint16_t VGA::Impl::ReadWord(memory::Address addr)
 {
     logger->info("read(16) @ 0x{:4x}", addr);
     if (addr >= 0xb8000 && addr <= 0xb8fff - 1) {
@@ -136,7 +135,7 @@ uint16_t VGA::Impl::ReadWord(Memory::Address addr)
     }
 }
 
-void VGA::Impl::WriteByte(Memory::Address addr, uint8_t data)
+void VGA::Impl::WriteByte(memory::Address addr, uint8_t data)
 {
     logger->info("write(8) @ 0x{:4x} data=0x{:04x}", addr, data);
     if (addr >= 0xb8000 && addr <= 0xb8fff) {
@@ -144,7 +143,7 @@ void VGA::Impl::WriteByte(Memory::Address addr, uint8_t data)
     }
 }
 
-void VGA::Impl::WriteWord(Memory::Address addr, uint16_t data)
+void VGA::Impl::WriteWord(memory::Address addr, uint16_t data)
 {
     logger->info("write(16) @ 0x{:4x} data=0x{:04x}", addr, data);
     if (addr >= 0xb8000 && addr <= 0xb8fff - 1) {

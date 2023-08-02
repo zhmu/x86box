@@ -1,7 +1,8 @@
 #pragma once
 
-#include "io.h"
 #include <memory>
+
+struct IOInterface;
 
 class ImageProvider;
 
@@ -11,7 +12,7 @@ class ATA final
     std::unique_ptr<Impl> impl;
 
   public:
-    ATA(IO& io, ImageProvider&);
+    ATA(IOInterface& io, ImageProvider&);
     ~ATA();
 
     void Reset();

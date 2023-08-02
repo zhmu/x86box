@@ -1,19 +1,17 @@
-#ifndef __CPUX86_H__
-#define __CPUX86_H__
+#pragma once
 
-#include <stdint.h>
-#include <variant>
+#include <cstdint>
 #include "state.h"
 
-class IO;
-class Memory;
+struct IOInterface;
+struct MemoryInterface;
 
 class CPUx86
 {
   public:
     using addr_t = uint32_t;
 
-    CPUx86(Memory& oMemory, IO& oIO);
+    CPUx86(MemoryInterface& oMemory, IOInterface& oIO);
     ~CPUx86();
 
     void RunInstruction();
@@ -26,9 +24,7 @@ class CPUx86
     void HandleInterrupt(uint8_t no);
 
   private:
-    Memory& m_Memory;
-    IO& m_IO;
+    MemoryInterface& m_Memory;
+    IOInterface& m_IO;
     cpu::State m_State;
 };
-
-#endif /* __CPUX86_H__ */

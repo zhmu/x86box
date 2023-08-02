@@ -74,6 +74,17 @@ namespace
         constexpr inline uint8_t CascadeMode = 0b11 << 6;
         constexpr inline uint8_t ModeMask = 0b11 << 6;
     }
+
+    struct Transfer : DMATransfer
+    {
+        const int ch_num;
+        DMA::Impl& impl;
+
+        Transfer(int ch, DMA::Impl& impl) : ch_num(ch), impl(impl) { }
+        size_t WriteFromPeripheral(uint16_t offset, std::span<const uint8_t> data) override;
+        size_t GetTotalLength() override;
+        void Complete() override;
+    };
 }
 
 struct DMA::Impl : IOPeripheral
@@ -93,7 +104,7 @@ struct DMA::Impl : IOPeripheral
     uint8_t status{};
     bool flipflop{};
 
-    Impl(IO& io, Memory& memory);
+    Impl(IOInterface& io, Memory& memory);
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -103,7 +114,7 @@ struct DMA::Impl : IOPeripheral
     void Reset();
 };
 
-DMA::DMA(IO& io, Memory& memory)
+DMA::DMA(IOInterface& io, Memory& memory)
     : impl(std::make_unique<Impl>(io, memory))
 {
 }
@@ -115,12 +126,12 @@ void DMA::Reset()
     impl->Reset();
 }
 
-DMA::Transfer DMA::InitiateTransfer(int ch_num)
+std::unique_ptr<DMATransfer> DMA::InitiateTransfer(int ch_num)
 {
-    return DMA::Transfer{ ch_num, *impl };
+    return std::make_unique<Transfer>(ch_num, *impl);
 }
 
-DMA::Impl::Impl(IO& io, Memory& memory)
+DMA::Impl::Impl(IOInterface& io, Memory& memory)
     : memory(memory)
     , logger(spdlog::stderr_color_st("dma"))
 {
@@ -187,13 +198,13 @@ void DMA::Impl::Out8(io_port port, uint8_t val)
     }
 }
 
-size_t DMA::Transfer::GetTotalLength()
+size_t Transfer::GetTotalLength()
 {
     auto& ch = impl.channel[ch_num];
     return ch.count + 1;
 }
 
-size_t DMA::Transfer::WriteFromPeripheral(uint16_t offset, std::span<const uint8_t> data)
+size_t Transfer::WriteFromPeripheral(uint16_t offset, std::span<const uint8_t> data)
 {
     impl.logger->info("ch{}: write data from periphal, offset {}, length {}", ch_num, offset, data.size());
     if (impl.mask & (1 << ch_num)) {
@@ -228,7 +239,7 @@ size_t DMA::Transfer::WriteFromPeripheral(uint16_t offset, std::span<const uint8
     return data.size();
 }
 
-void DMA::Transfer::Complete()
+void Transfer::Complete()
 {
     impl.status |= (1 << ch_num); // set transfer complete
     impl.mask |= (1 << ch_num); // mask channel

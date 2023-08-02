@@ -2,19 +2,20 @@
 
 #include <memory>
 #include <optional>
+#include "pitinterface.h"
 
-class IO;
+struct IOInterface;
 
-class PIT final
+class PIT final : public PITInterface
 {
     struct Impl;
     std::unique_ptr<Impl> impl;
 
   public:
-    PIT(IO& io);
+    PIT(IOInterface& io);
     ~PIT();
 
     void Reset();
     bool Tick();
-    bool GetTimer2Output() const;
+    bool GetTimer2Output() const override;
 };

@@ -2,7 +2,7 @@
 
 #include <memory>
 
-class IO;
+struct IOInterface;
 
 class RTC final
 {
@@ -10,7 +10,7 @@ class RTC final
     std::unique_ptr<Impl> impl;
 
   public:
-    RTC(IO& io);
+    RTC(IOInterface& io);
     ~RTC();
 
     void Reset();

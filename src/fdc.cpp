@@ -1,7 +1,7 @@
 #include "fdc.h"
 #include "io.h"
-#include "pic.h"
-#include "dma.h"
+#include "picinterface.h"
+#include "dmainterface.h"
 #include "imageprovider.h"
 
 #include "spdlog/spdlog.h"
@@ -154,8 +154,8 @@ namespace
 
 struct FDC::Impl : IOPeripheral
 {
-    PIC& pic;
-    DMA& dma;
+    PICInterface& pic;
+    DMAInterface& dma;
     ImageProvider& imageProvider;
     std::shared_ptr<spdlog::logger> logger;
     uint8_t dor = 0x0;
@@ -173,7 +173,7 @@ struct FDC::Impl : IOPeripheral
         TransmitFifoBytes,
     } state = State::Idle;
 
-    Impl(PIC& pic, DMA& dma, ImageProvider& imageProvider);
+    Impl(PICInterface& pic, DMAInterface& dma, ImageProvider& imageProvider);
     void Reset();
     bool ExecuteCurrentCommand();
 
@@ -183,7 +183,7 @@ struct FDC::Impl : IOPeripheral
     uint16_t In16(io_port port) override;
 };
 
-FDC::FDC(IO& io, PIC& pic, DMA& dma, ImageProvider& imageProvider)
+FDC::FDC(IOInterface& io, PICInterface& pic, DMAInterface& dma, ImageProvider& imageProvider)
     : impl(std::make_unique<Impl>(pic, dma, imageProvider))
 {
     io.AddPeripheral(io::Base, 8, *impl);
@@ -196,7 +196,7 @@ void FDC::Reset()
     impl->Reset();
 }
 
-FDC::Impl::Impl(PIC& pic, DMA& dma, ImageProvider& imageProvider)
+FDC::Impl::Impl(PICInterface& pic, DMAInterface& dma, ImageProvider& imageProvider)
     : pic(pic), dma(dma), imageProvider(imageProvider)
     , logger(spdlog::stderr_color_st("fdc"))
 {
@@ -224,7 +224,7 @@ void FDC::Impl::Out8(io_port port, uint8_t val)
                 // Reset toggled from lo -> hi
                 logger->warn("reset");
                 Reset();
-                pic.AssertIRQ(PIC::IRQ::FDC);
+                pic.AssertIRQ(PICInterface::IRQ::FDC);
             }
             dor = val;
             break;
@@ -243,7 +243,7 @@ void FDC::Impl::Out8(io_port port, uint8_t val)
                         logger->info("executing command {} (fifo contains {} bytes)", fifo[0], fifoWriteOffset);
                         if (ExecuteCurrentCommand()) {
                             logger->info("triggering interrupt upon command completion");
-                            pic.AssertIRQ(PIC::IRQ::FDC);
+                            pic.AssertIRQ(PICInterface::IRQ::FDC);
                         }
                         if (fifoReadBytesAvailable > 0) {
                             state = State::TransmitFifoBytes;
@@ -345,7 +345,7 @@ bool FDC::Impl::ExecuteCurrentCommand()
         constexpr int DMA_FLOPPY = 2;
         auto xfer = dma.InitiateTransfer(DMA_FLOPPY);
 
-        const auto total_length = xfer.GetTotalLength();
+        const auto total_length = xfer->GetTotalLength();
         if ((total_length % sector.size()) != 0) {
             logger->error("reading partial sectors?! ({})", total_length);
             std::abort();
@@ -361,13 +361,13 @@ bool FDC::Impl::ExecuteCurrentCommand()
                 st1 |= st1::NoData;
                 break;
             }
-            if (xfer.WriteFromPeripheral(transfer_offset, sector) == 0) {
+            if (xfer->WriteFromPeripheral(transfer_offset, sector) == 0) {
                 logger->critical("dma rejected our data");
                 std::abort();
                 break;
             }
         }
-        xfer.Complete();
+        xfer->Complete();
 
         storeByteInFifo(st0);
         storeByteInFifo(st1);

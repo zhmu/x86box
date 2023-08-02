@@ -1,5 +1,5 @@
 #include "rtc.h"
-#include "io.h"
+#include "iointerface.h"
 #include <time.h>
 
 #include <array>
@@ -70,14 +70,14 @@ struct RTC::Impl : IOPeripheral
     std::array<uint8_t, 0x2f> cmosData{};
     uint8_t selectedRegister{};
 
-    Impl(IO& io);
+    Impl(IOInterface& io);
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
     uint16_t In16(io_port port) override;
 };
 
-RTC::RTC(IO& io)
+RTC::RTC(IOInterface& io)
     : impl(std::make_unique<Impl>(io))
 {
 }
@@ -92,7 +92,7 @@ void RTC::Reset()
     impl->cmosData[0x10] = 0x40;
 }
 
-RTC::Impl::Impl(IO& io)
+RTC::Impl::Impl(IOInterface& io)
     : logger(spdlog::stderr_color_st("rtc"))
 {
     io.AddPeripheral(io::Base, 10, *this);

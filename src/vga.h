@@ -4,8 +4,8 @@
 #include <memory>
 
 class HostIO;
-class IO;
-class Memory;
+struct IOInterface;
+struct MemoryInterface;
 
 class VGA final
 {
@@ -13,11 +13,11 @@ class VGA final
     std::unique_ptr<Impl> impl;
 
 public:
-    VGA(Memory& memory, IO& io, HostIO& hostio);
+    VGA(MemoryInterface& memory, IOInterface& io, HostIO& hostio);
     ~VGA();
 
-    virtual void Reset();
-    virtual void Update();
+    void Reset();
+    void Update();
 
     // XXX Resolution for now
     static constexpr inline unsigned int s_video_width = 640;

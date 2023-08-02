@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <bit>
 #include <utility>
+#include <variant>
 #include "alu.h"
 
 #include "spdlog/spdlog.h"
@@ -30,8 +31,8 @@ namespace
     }
 }
 
-CPUx86::CPUx86(Memory& oMemory, IO& oIO)
-    : m_Memory(oMemory), m_IO(oIO)
+CPUx86::CPUx86(MemoryInterface& memory, IOInterface& io)
+    : m_Memory(memory), m_IO(io)
 {
 }
 
@@ -181,7 +182,7 @@ namespace
         return CPUx86::MakeAddr(seg, mem.off + mem.disp);
     }
 
-    uint8_t ReadEA8(Memory& memory, cpu::State& state, const ModRM& modrm)
+    uint8_t ReadEA8(MemoryInterface& memory, cpu::State& state, const ModRM& modrm)
     {
         return std::visit(overloaded{
             [&](const ModRM_Register& reg) {
@@ -194,7 +195,7 @@ namespace
         }, modrm);
     }
 
-    void WriteEA8(Memory& memory, cpu::State& state, const ModRM& modrm, const uint8_t val)
+    void WriteEA8(MemoryInterface& memory, cpu::State& state, const ModRM& modrm, const uint8_t val)
     {
         return std::visit(overloaded{
             [&](const ModRM_Register& reg) {
@@ -206,7 +207,7 @@ namespace
             } }, modrm);
     }
 
-    uint16_t ReadEA16(Memory& memory, cpu::State& state, const ModRM& modrm, uint16_t offset_delta = 0)
+    uint16_t ReadEA16(MemoryInterface& memory, cpu::State& state, const ModRM& modrm, uint16_t offset_delta = 0)
     {
         return std::visit(overloaded{
             [&](const ModRM_Register& reg) {
@@ -229,7 +230,7 @@ namespace
             } }, modrm);
     }
 
-    void WriteEA16(Memory& memory, cpu::State& state, const ModRM& modrm, uint16_t value)
+    void WriteEA16(MemoryInterface& memory, cpu::State& state, const ModRM& modrm, uint16_t value)
     {
         return std::visit(overloaded{
             [&](const ModRM_Register& reg) {
@@ -241,25 +242,25 @@ namespace
             } }, modrm);
     }
 
-    void Push16(Memory& memory, cpu::State& state, const uint16_t value)
+    void Push16(MemoryInterface& memory, cpu::State& state, const uint16_t value)
     {
         memory.WriteWord(CPUx86::MakeAddr(state.m_ss, state.m_sp - 2), value);
         state.m_sp -= 2;
     }
 
-    uint16_t Pop16(Memory& memory, cpu::State& state)
+    uint16_t Pop16(MemoryInterface& memory, cpu::State& state)
     {
         const auto value = memory.ReadWord(CPUx86::MakeAddr(state.m_ss, state.m_sp));
         state.m_sp += 2;
         return value;
     }
 
-    uint8_t GetCodeImm8(Memory& memory, cpu::State& state)
+    uint8_t GetCodeImm8(MemoryInterface& memory, cpu::State& state)
     {
         return memory.ReadByte(CPUx86::MakeAddr(state.m_cs, state.m_ip++));
     }
 
-    uint16_t GetCodeImm16(Memory& memory, cpu::State& state)
+    uint16_t GetCodeImm16(MemoryInterface& memory, cpu::State& state)
     {
         const uint16_t a = GetCodeImm8(memory, state);
         const uint16_t b = GetCodeImm8(memory, state);
@@ -296,13 +297,13 @@ namespace
         };
     }
 
-    ModRegRM GetModRegRm(Memory& memory, cpu::State& state)
+    ModRegRM GetModRegRm(MemoryInterface& memory, cpu::State& state)
     {
         const auto v = GetCodeImm8(memory, state);
         return DecodeModXXXRm<ModRegRM>(v);
     }
 
-    ModOpRM GetModOpRm(Memory& memory, cpu::State& state)
+    ModOpRM GetModOpRm(MemoryInterface& memory, cpu::State& state)
     {
         const auto v = GetCodeImm8(memory, state);
         return DecodeModXXXRm<ModOpRM>(v);
@@ -314,7 +315,7 @@ namespace
     }
 
     template<typename T>
-    ModRM DecodeModRm(Memory& memory, cpu::State& state, const T& mr)
+    ModRM DecodeModRm(MemoryInterface& memory, cpu::State& state, const T& mr)
         requires (std::is_same_v<T, ModOpRM> || std::is_same_v<T, ModRegRM>)
     {
         if (mr.mod == 3) /* rm treated as reg field */ {

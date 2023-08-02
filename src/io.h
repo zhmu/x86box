@@ -3,18 +3,9 @@
 
 #include <cstdint>
 #include <memory>
+#include "iointerface.h"
 
-using io_port = uint16_t;
-
-struct IOPeripheral
-{
-    virtual void Out8(io_port port, uint8_t val) = 0;
-    virtual void Out16(io_port port, uint16_t val) = 0;
-    virtual uint8_t In8(io_port port) = 0;
-    virtual uint16_t In16(io_port port) = 0;
-};
-
-class IO final
+class IO final : public IOInterface
 {
     struct Impl;
     std::unique_ptr<Impl> impl;
@@ -23,13 +14,13 @@ public:
     IO();
     ~IO();
     void Reset();
-    void AddPeripheral(io_port base, uint16_t length, IOPeripheral& peripheral);
+    void AddPeripheral(io_port base, uint16_t length, IOPeripheral& peripheral) override;
 
-    void Out8(io_port port, uint8_t val);
-    void Out16(io_port port, uint16_t val);
+    void Out8(io_port port, uint8_t val) override;
+    void Out16(io_port port, uint16_t val) override;
 
-    uint8_t In8(io_port port);
-    uint16_t In16(io_port port);
+    uint8_t In8(io_port port) override;
+    uint16_t In16(io_port port) override;
 };
 
 #endif /* __IO_H__ */

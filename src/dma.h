@@ -1,33 +1,23 @@
 #pragma once
 
 #include <memory>
-#include <span>
+#include "dmainterface.h"
 
-class IO;
+struct IOInterface;
 class Memory;
 
-class DMA final
+class DMA final : public DMAInterface
 {
+public:
     struct Impl;
+
+private:
     std::unique_ptr<Impl> impl;
 
   public:
-    DMA(IO&, Memory&);
+    DMA(IOInterface&, Memory&);
     ~DMA();
 
-    class Transfer
-    {
-      const int ch_num;
-      Impl& impl;
-
-    public:
-      Transfer(int ch_num, Impl& impl) : ch_num(ch_num), impl(impl) { }
-
-      size_t WriteFromPeripheral(uint16_t offset, std::span<const uint8_t> data);
-      size_t GetTotalLength();
-      void Complete();
-    };
-
     void Reset();
-    Transfer InitiateTransfer(int ch_num);
+    std::unique_ptr<DMATransfer> InitiateTransfer(int ch_num) override;
 };

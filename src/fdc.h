@@ -1,10 +1,10 @@
 #pragma once
 
 #include <memory>
-#include <optional>
 
-class DMA;
-class IO;
+struct DMAInterface;
+struct IOInterface;
+struct PICInterface;
 class PIC;
 class ImageProvider;
 
@@ -14,7 +14,7 @@ class FDC final
     std::unique_ptr<Impl> impl;
 
   public:
-    FDC(IO&, PIC&, DMA&, ImageProvider&);
+    FDC(IOInterface&, PICInterface&, DMAInterface&, ImageProvider&);
     ~FDC();
 
     void Reset();

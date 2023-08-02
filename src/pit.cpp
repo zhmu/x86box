@@ -54,7 +54,7 @@ struct PIT::Impl : IOPeripheral
     std::array<Channel, 3> channel;
     uint8_t control{};
 
-    Impl(IO& io);
+    Impl(IOInterface& io);
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
@@ -63,7 +63,7 @@ struct PIT::Impl : IOPeripheral
     bool TickChannel(size_t ch_num, std::chrono::steady_clock::time_point now);
 };
 
-PIT::PIT(IO& io)
+PIT::PIT(IOInterface& io)
     : impl(std::make_unique<Impl>(io))
 {
 }
@@ -93,8 +93,8 @@ void PIT::Reset()
 
     return signal_irq;
 }
- 
-PIT::Impl::Impl(IO& io)
+
+PIT::Impl::Impl(IOInterface& io)
     : logger(spdlog::stderr_color_st("pit"))
 {
     io.AddPeripheral(io::Base, 4, *this);

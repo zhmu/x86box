@@ -28,7 +28,7 @@ struct Keyboard::Impl : IOPeripheral
     std::shared_ptr<spdlog::logger> logger;
     std::deque<uint8_t> scancode;
 
-    Impl(IO&, HostIO&);
+    Impl(IOInterface&, HostIO&);
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -36,7 +36,7 @@ struct Keyboard::Impl : IOPeripheral
     uint16_t In16(io_port port) override;
 };
 
-Keyboard::Impl::Impl(IO& io, HostIO& hostio)
+Keyboard::Impl::Impl(IOInterface& io, HostIO& hostio)
     : hostio(hostio)
     , logger(spdlog::stderr_color_st("keyboard"))
 {
@@ -44,7 +44,7 @@ Keyboard::Impl::Impl(IO& io, HostIO& hostio)
     io.AddPeripheral(io::Status_Read, 1, *this);
 }
 
-Keyboard::Keyboard(IO& io, HostIO& hostio)
+Keyboard::Keyboard(IOInterface& io, HostIO& hostio)
     : impl(std::make_unique<Impl>(io, hostio))
 {
 }

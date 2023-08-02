@@ -2,8 +2,8 @@
 
 #include <memory>
 
-class IO;
-class PIT;
+struct IOInterface;
+struct PITInterface;
 
 class PPI final
 {
@@ -11,7 +11,7 @@ class PPI final
     std::unique_ptr<Impl> impl;
 
   public:
-    PPI(IO&, PIT&);
+    PPI(IOInterface&, PITInterface&);
     ~PPI();
 
     void Reset();

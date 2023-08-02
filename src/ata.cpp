@@ -1,5 +1,6 @@
 #include "ata.h"
 #include "imageprovider.h"
+#include "iointerface.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
@@ -152,7 +153,7 @@ struct ATA::Impl : IOPeripheral
     size_t sectors_left{};
 };
 
-ATA::ATA(IO& io, ImageProvider& imageProvider)
+ATA::ATA(IOInterface& io, ImageProvider& imageProvider)
     : impl(std::make_unique<Impl>(imageProvider))
 {
     io.AddPeripheral(io::Base, 16, *impl);

@@ -6,55 +6,100 @@
 
 namespace
 {
-    static const unsigned int memorySize = 1048576;
+    static constexpr size_t memorySize = 1048576;
+
+    struct Mapping
+    {
+        const memory::Address base;
+        const uint16_t length;
+        MemoryMappedPeripheral& peripheral;
+
+        bool Matches(memory::Address addr) const {
+            return addr >= base && addr < base + length;
+        }
+    };
 }
 
-Memory::Memory() { m_Memory = std::make_unique<uint8_t[]>(memorySize); }
+struct Memory::Impl
+{
+    std::unique_ptr<uint8_t[]> memory;
+
+    std::vector<Mapping> mappings;
+
+    Impl();
+    void Reset();
+    MemoryMappedPeripheral* FindPeripheralByAddress(const memory::Address addr);
+};
+
+Memory::Memory()
+    : impl(std::make_unique<Impl>())
+{
+}
+
 Memory::~Memory() = default;
 
-void Memory::Reset() { memset(m_Memory.get(), 0, memorySize); }
-
-uint8_t Memory::ReadByte(Address addr)
+Memory::Impl::Impl()
+    : memory(std::make_unique<uint8_t[]>(memorySize))
 {
-    const auto p = FindPeripheralByAddress(addr);
-    if (p) return p->ReadByte(addr);
-    return m_Memory[addr];
+    Reset();
 }
 
-uint16_t Memory::ReadWord(Address addr)
+void Memory::Impl::Reset()
 {
-    const auto p = FindPeripheralByAddress(addr);
-    if (p) return p->ReadWord(addr);
-    return m_Memory[addr] | (uint16_t)m_Memory[addr + 1] << 8;
+    std::fill(memory.get(), memory.get() + memorySize, 0);
 }
 
-void Memory::WriteByte(Address addr, uint8_t data)
+MemoryMappedPeripheral* Memory::Impl::FindPeripheralByAddress(const memory::Address addr)
 {
-    const auto p = FindPeripheralByAddress(addr);
-    if (p) {
+    const auto it = std::find_if(mappings.begin(), mappings.end(), [&](const auto& p) {
+        return p.Matches(addr);
+    });
+    return it != mappings.end() ? &it->peripheral : nullptr;
+}
+
+void Memory::Reset() { impl->Reset(); }
+
+uint8_t Memory::ReadByte(memory::Address addr)
+{
+    if (const auto p = impl->FindPeripheralByAddress(addr); p)
+        return p->ReadByte(addr);
+    else
+        return impl->memory[addr];
+}
+
+uint16_t Memory::ReadWord(memory::Address addr)
+{
+    if (const auto p = impl->FindPeripheralByAddress(addr); p)
+        return p->ReadWord(addr);
+    else
+        return impl->memory[addr] | static_cast<uint16_t>(impl->memory[addr + 1]) << 8;
+}
+
+void Memory::WriteByte(memory::Address addr, uint8_t data)
+{
+    if (const auto p = impl->FindPeripheralByAddress(addr); p) {
         p->WriteByte(addr, data);
     } else {
-        m_Memory[addr] = data;
+        impl->memory[addr] = data;
     }
 }
 
-void Memory::WriteWord(Address addr, uint16_t data)
+void Memory::WriteWord(memory::Address addr, uint16_t data)
 {
-    const auto p = FindPeripheralByAddress(addr);
-    if (p) {
+    if (const auto p = impl->FindPeripheralByAddress(addr); p) {
         p->WriteWord(addr, data);
     } else {
-        m_Memory[addr + 0] = data & 0xff;
-        m_Memory[addr + 1] = data >> 8;
+        impl->memory[addr + 0] = data & 0xff;
+        impl->memory[addr + 1] = data >> 8;
     }
 }
 
-void Memory::AddPeripheral(Address base, uint16_t length, XMemoryMapped& oPeripheral)
+void Memory::AddPeripheral(memory::Address base, uint16_t length, MemoryMappedPeripheral& peripheral)
 {
-    m_peripheral.push_back(MemoryMapped(base, length, oPeripheral));
+    impl->mappings.push_back(Mapping(base, length, peripheral));
 }
 
-std::string Memory::GetASCIIZString(Address addr)
+std::string Memory::GetASCIIZString(memory::Address addr)
 {
     std::string s;
     while(true) {
@@ -66,17 +111,10 @@ std::string Memory::GetASCIIZString(Address addr)
     return s;
 }
 
-void* Memory::GetPointer(Address addr, uint16_t length)
+void* Memory::GetPointer(memory::Address addr, uint16_t length)
 {
-    auto p = FindPeripheralByAddress(addr);
-    if (p) return nullptr;
-    return &m_Memory[addr];
-}
-
-XMemoryMapped* Memory::FindPeripheralByAddress(const Address addr)
-{
-    auto it = std::find_if(m_peripheral.begin(), m_peripheral.end(), [&](const auto& p) {
-        return p.Matches(addr);
-    });
-    return it != m_peripheral.end() ? &it->m_peripheral : nullptr;
+    if (const auto p = impl->FindPeripheralByAddress(addr); p)
+        return nullptr;
+    else
+        return &impl->memory[addr];
 }

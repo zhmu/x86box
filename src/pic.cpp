@@ -51,7 +51,7 @@ struct PIC::Impl : IOPeripheral
     uint8_t isr{};
     uint8_t imr{0xff};
 
-    Impl(IO& io);
+    Impl(IOInterface& io);
     void SetPendingIRQState(IRQ irq, bool pending);
     std::optional<int> DequeuePendingIRQ();
 
@@ -61,7 +61,7 @@ struct PIC::Impl : IOPeripheral
     uint16_t In16(io_port port) override;
 };
 
-PIC::PIC(IO& io)
+PIC::PIC(IOInterface& io)
     : impl(std::make_unique<Impl>(io))
 {
 }
@@ -82,7 +82,7 @@ std::optional<int> PIC::DequeuePendingIRQ()
     return impl->DequeuePendingIRQ();
 }
 
-PIC::Impl::Impl(IO& io)
+PIC::Impl::Impl(IOInterface& io)
     : logger(spdlog::stderr_color_st("pic"))
 {
     io.AddPeripheral(io::Base, 2, *this);

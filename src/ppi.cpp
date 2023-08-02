@@ -40,7 +40,7 @@ namespace
 
 struct PPI::Impl : IOPeripheral
 {
-    PIT& pit;
+    PITInterface& pit;
     std::shared_ptr<spdlog::logger> logger;
 
     uint8_t controlReg{};
@@ -48,7 +48,7 @@ struct PPI::Impl : IOPeripheral
     uint8_t switchReg{0b0000'0000};
     uint8_t sw{0b0000'0000};
 
-    Impl(IO& io, PIT& pit);
+    Impl(IOInterface& io, PITInterface& pit);
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -56,7 +56,7 @@ struct PPI::Impl : IOPeripheral
     uint16_t In16(io_port port) override;
 };
 
-PPI::PPI(IO& io, PIT& pit)
+PPI::PPI(IOInterface& io, PITInterface& pit)
     : impl(std::make_unique<Impl>(io, pit))
 {
 }
@@ -67,7 +67,7 @@ void PPI::Reset()
 {
 }
 
-PPI::Impl::Impl(IO& io, PIT& pit)
+PPI::Impl::Impl(IOInterface& io, PITInterface& pit)
     : pit(pit)
     , logger(spdlog::stderr_color_st("ppi"))
 {
