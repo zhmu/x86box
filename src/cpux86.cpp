@@ -39,7 +39,6 @@ CPUx86::~CPUx86() = default;
 
 void CPUx86::Reset()
 {
-    m_State.m_prefix = 0;
     m_State.m_flags = UpdateFlagsForCPU(0);
     m_State.m_cs = 0xffff;
     m_State.m_ip = 0;
@@ -452,8 +451,12 @@ void CPUx86::RunInstruction()
 
 
     // Handle prefixes first
-    m_State.m_prefix = 0;
     m_State.m_seg_override = {};
+    enum class Rep {
+        Z,
+        NZ,
+    };
+    std::optional<Rep> rep;
     auto opcode = GetCodeImm8(m_Memory, m_State);
     while(true) {
         if (opcode == 0x26) { /* ES: */
@@ -467,9 +470,9 @@ void CPUx86::RunInstruction()
         } else if (opcode == 0xf0) { /* LOCK */
             spdlog::critical("cpu: unimplemented prefix 'lock'");
         } else if (opcode == 0xf2) { /* REPNZ */
-            m_State.m_prefix |= cpu::State::PREFIX_REPNZ;
+            rep = Rep::NZ;
         } else if (opcode == 0xf3) { /* REPZ */
-            m_State.m_prefix |= cpu::State::PREFIX_REPZ;
+            rep = Rep::Z;
         } else {
             break;
         }
@@ -1292,7 +1295,7 @@ void CPUx86::RunInstruction()
         case 0xa4: /* MOVSB */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+            if (rep) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteByte(
@@ -1301,7 +1304,6 @@ void CPUx86::RunInstruction()
                     m_State.m_si += delta;
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteByte(
                     MakeAddr(m_State.m_es, m_State.m_di),
@@ -1314,7 +1316,7 @@ void CPUx86::RunInstruction()
         case 0xa5: /* MOVSW */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
             const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+            if (rep) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteWord(
@@ -1323,7 +1325,6 @@ void CPUx86::RunInstruction()
                     m_State.m_si += delta;
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteWord(
                     MakeAddr(m_State.m_es, m_State.m_di),
@@ -1336,8 +1337,8 @@ void CPUx86::RunInstruction()
         case 0xa6: /* CMPSB */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
+            if (rep) {
+                const auto break_on_zf = *rep == Rep::NZ;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     alu::CMP<8>(m_State.m_flags,
@@ -1348,7 +1349,6 @@ void CPUx86::RunInstruction()
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 alu::CMP<8>(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)),
@@ -1361,8 +1361,8 @@ void CPUx86::RunInstruction()
         case 0xa7: /* CMPSW */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
             const auto seg = HandleSegmentOverride(m_State, cpu::Segment::DS);
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & cpu::State::PREFIX_REPNZ) != 0;
+            if (rep) {
+                const auto break_on_zf = *rep == Rep::NZ;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     alu::CMP<16>(m_State.m_flags,
@@ -1373,7 +1373,6 @@ void CPUx86::RunInstruction()
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 alu::CMP<16>(m_State.m_flags,
                     m_Memory.ReadByte(MakeAddr(GetSReg16(m_State, seg), m_State.m_si)),
@@ -1396,13 +1395,12 @@ void CPUx86::RunInstruction()
         case 0xaa: /* STOSB */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             uint8_t value = m_State.m_ax & 0xff;
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+            if (rep) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteByte(MakeAddr(m_State.m_es, m_State.m_di), value);
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteByte(MakeAddr(m_State.m_es, m_State.m_di), value);
                 m_State.m_di += delta;
@@ -1411,13 +1409,12 @@ void CPUx86::RunInstruction()
         }
         case 0xab: /* STOSW */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
+            if (rep) {
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     m_Memory.WriteWord(MakeAddr(m_State.m_es, m_State.m_di), m_State.m_ax);
                     m_State.m_di += delta;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 m_Memory.WriteWord(MakeAddr(m_State.m_es, m_State.m_di), m_State.m_ax);
                 m_State.m_di += delta;
@@ -1446,8 +1443,8 @@ void CPUx86::RunInstruction()
         case 0xae: /* SCASB */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -1 : 1;
             uint8_t val = m_State.m_ax & 0xff;
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
+            if (rep) {
+                const auto break_on_zf = *rep == Rep::NZ;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     alu::CMP<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
@@ -1455,7 +1452,6 @@ void CPUx86::RunInstruction()
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 alu::CMP<8>(m_State.m_flags, val, m_Memory.ReadByte(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;
@@ -1464,8 +1460,8 @@ void CPUx86::RunInstruction()
         }
         case 0xaf: /* SCASW */ {
             int delta = cpu::FlagDirection(m_State.m_flags) ? -2 : 2;
-            if (m_State.m_prefix & (cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ)) {
-                bool break_on_zf = (m_State.m_prefix & (cpu::State::PREFIX_REPNZ)) != 0;
+            if (rep) {
+                const bool break_on_zf = rep == Rep::NZ;
                 while (m_State.m_cx != 0) {
                     m_State.m_cx--;
                     alu::CMP<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
@@ -1473,7 +1469,6 @@ void CPUx86::RunInstruction()
                     if (cpu::FlagZero(m_State.m_flags) == break_on_zf)
                         break;
                 }
-                m_State.m_prefix &= ~(cpu::State::PREFIX_REPZ | cpu::State::PREFIX_REPNZ);
             } else {
                 alu::CMP<16>(m_State.m_flags, m_State.m_ax, m_Memory.ReadWord(MakeAddr(m_State.m_es, m_State.m_di)));
                 m_State.m_di += delta;

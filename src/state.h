@@ -37,11 +37,7 @@ namespace cpu
         uint16_t m_ax, m_cx, m_dx, m_bx, m_sp, m_bp, m_si, m_di, m_ip;
         uint16_t m_es, m_cs, m_ss, m_ds;
         uint16_t m_flags;
-        uint16_t m_prefix;
         std::optional<Segment> m_seg_override;
-
-        static const unsigned int PREFIX_REPZ = (1 << 0);
-        static const unsigned int PREFIX_REPNZ = (1 << 1);
     };
 
     void Dump(const State& state);
