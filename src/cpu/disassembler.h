@@ -3,7 +3,7 @@
 #include <memory>
 #include "state.h"
 
-class Memory;
+struct MemoryInterface;
 
 class Disassembler final
 {
@@ -14,5 +14,5 @@ public:
     Disassembler();
     ~Disassembler();
 
-    std::string Disassemble(Memory& memory, const cpu::State& state);
+    std::string Disassemble(MemoryInterface& memory, const cpu::State& state);
 };

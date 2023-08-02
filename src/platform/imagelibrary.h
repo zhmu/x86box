@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
-#include "imageprovider.h"
+#include "../interface/imageprovider.h"
+
+struct ImageProvider;
 
 class ImageLibrary
 {

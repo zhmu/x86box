@@ -1,8 +1,8 @@
 #include "fdc.h"
-#include "io.h"
-#include "picinterface.h"
-#include "dmainterface.h"
-#include "imageprovider.h"
+#include "../interface/picinterface.h"
+#include "../interface/dmainterface.h"
+#include "../interface/iointerface.h"
+#include "../interface/imageprovider.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"

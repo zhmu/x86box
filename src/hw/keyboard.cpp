@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "io.h"
-#include "hostio.h"
+#include "../interface/iointerface.h"
+#include "../platform/hostio.h"
 
 #include <deque>
 

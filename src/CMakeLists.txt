@@ -1,8 +1,23 @@
-add_executable(x86box cpux86.cpp io.cpp main.cpp memory.cpp vga.cpp keyboard.cpp ata.cpp pic.cpp pit.cpp dma.cpp ppi.cpp rtc.cpp fdc.cpp imagelibrary.cpp ${CMAKE_CURRENT_BINARY_DIR}/vgafont.h)
+add_executable(x86box
+    cpu/cpux86.cpp
+    bus/io.cpp
+    bus/memory.cpp
+    main.cpp
+    hw/vga.cpp
+    hw/keyboard.cpp
+    hw/ata.cpp
+    hw/pic.cpp
+    hw/pit.cpp
+    hw/dma.cpp
+    hw/ppi.cpp
+    hw/rtc.cpp
+    hw/fdc.cpp
+    platform/imagelibrary.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/vgafont.h)
 target_include_directories(x86box PRIVATE ${SDL2_INCLUDE_DIRS})
 target_link_libraries(x86box PRIVATE ${SDL2_LIBRARIES})
-target_sources(x86box PRIVATE hostio.cpp)
-target_sources(x86box PRIVATE disassembler.cpp)
+target_sources(x86box PRIVATE platform/hostio.cpp)
+target_sources(x86box PRIVATE cpu/disassembler.cpp)
 
 target_link_libraries(x86box PRIVATE spdlog::spdlog argparse)
 target_link_libraries(x86box PRIVATE capstone)

@@ -1,9 +1,8 @@
-#ifndef __IO_H__
-#define __IO_H__
+#pragma once
 
 #include <cstdint>
 #include <memory>
-#include "iointerface.h"
+#include "../interface/iointerface.h"
 
 class IO final : public IOInterface
 {
@@ -22,5 +21,3 @@ public:
     uint8_t In8(io_port port) override;
     uint16_t In16(io_port port) override;
 };
-
-#endif /* __IO_H__ */

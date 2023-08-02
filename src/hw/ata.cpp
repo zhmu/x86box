@@ -1,6 +1,6 @@
 #include "ata.h"
-#include "imageprovider.h"
-#include "iointerface.h"
+#include "../interface/imageprovider.h"
+#include "../interface/iointerface.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"

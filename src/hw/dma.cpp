@@ -1,6 +1,6 @@
 #include "dma.h"
-#include "io.h"
-#include "memory.h"
+#include "../interface/iointerface.h"
+#include "../interface/memoryinterface.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
@@ -89,7 +89,7 @@ namespace
 
 struct DMA::Impl : IOPeripheral
 {
-    Memory& memory;
+    MemoryInterface& memory;
     std::shared_ptr<spdlog::logger> logger;
 
     struct Channel {
@@ -104,7 +104,7 @@ struct DMA::Impl : IOPeripheral
     uint8_t status{};
     bool flipflop{};
 
-    Impl(IOInterface& io, Memory& memory);
+    Impl(IOInterface& io, MemoryInterface& memory);
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -114,7 +114,7 @@ struct DMA::Impl : IOPeripheral
     void Reset();
 };
 
-DMA::DMA(IOInterface& io, Memory& memory)
+DMA::DMA(IOInterface& io, MemoryInterface& memory)
     : impl(std::make_unique<Impl>(io, memory))
 {
 }
@@ -131,7 +131,7 @@ std::unique_ptr<DMATransfer> DMA::InitiateTransfer(int ch_num)
     return std::make_unique<Transfer>(ch_num, *impl);
 }
 
-DMA::Impl::Impl(IOInterface& io, Memory& memory)
+DMA::Impl::Impl(IOInterface& io, MemoryInterface& memory)
     : memory(memory)
     , logger(spdlog::stderr_color_st("dma"))
 {

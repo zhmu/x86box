@@ -1,4 +1,4 @@
-#include "alu.h"
+#include "../src/cpu/alu.h"
 #include <fstream>
 #include <iostream>
 #include <vector>

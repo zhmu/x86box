@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include <memory>
-#include "memoryinterface.h"
+#include "../interface/memoryinterface.h"
 
 class Memory final : public MemoryInterface
 {
@@ -24,7 +24,7 @@ class Memory final : public MemoryInterface
 
     void AddPeripheral(memory::Address base, uint16_t length, MemoryMappedPeripheral& peripheral) override;
 
-    void* GetPointer(memory::Address addr, uint16_t length);
+    void* GetPointer(memory::Address addr, uint16_t length) override;
     std::string GetASCIIZString(memory::Address addr);
 };
 

@@ -1,10 +1,10 @@
 #include "vga.h"
-#include <stdio.h>
-#include <string.h>
+#include <cstdio>
+#include <cstring>
 
-#include "io.h"
-#include "hostio.h"
-#include "memory.h"
+#include "../interface/iointerface.h"
+#include "../interface/memoryinterface.h"
+#include "../platform/hostio.h"
 #include "vgafont.h"
 
 #include "spdlog/spdlog.h"

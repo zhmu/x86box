@@ -3,8 +3,8 @@
 #include <iomanip>
 #include <sstream>
 #include <capstone/capstone.h>
-#include "cpux86.h"
-#include "memory.h"
+#include "../cpu/cpux86.h"
+#include "../interface/memoryinterface.h"
 
 namespace
 {
@@ -37,7 +37,7 @@ Disassembler::Disassembler()
 
 Disassembler::~Disassembler() = default;
 
-std::string Disassembler::Disassemble(Memory& memory, const cpu::State& state)
+std::string Disassembler::Disassemble(MemoryInterface& memory, const cpu::State& state)
 {
     const auto cs = state.m_cs;
     const auto ip = state.m_ip;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include "picinterface.h"
+#include "../interface/picinterface.h"
 
 struct IOInterface;
 

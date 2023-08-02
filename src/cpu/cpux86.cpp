@@ -1,8 +1,6 @@
 #include "cpux86.h"
-#include "io.h"
-#include "memory.h"
-#include <stdio.h>
-#include <stdlib.h>
+#include "../interface/iointerface.h"
+#include "../interface/memoryinterface.h"
 #include <bit>
 #include <utility>
 #include <variant>
@@ -2022,10 +2020,10 @@ void CPUx86::RunInstruction()
 
             uint8_t val = ReadEA8(m_Memory, m_State, modRm);
             switch (mor.op) {
-                case 0: // inc
+                case 0: // INC
                     WriteEA8(m_Memory, m_State, modRm, alu::INC<8>(m_State.m_flags, val));
                     break;
-                case 1: // dec
+                case 1: // DEC
                     WriteEA8(m_Memory, m_State, modRm, alu::DEC<8>(m_State.m_flags, val));
                     break;
                 default: // invalid
@@ -2077,7 +2075,7 @@ void CPUx86::RunInstruction()
 
 CPUx86::addr_t CPUx86::MakeAddr(uint16_t seg, uint16_t off)
 {
-    return ((addr_t)seg << 4) + (addr_t)off;
+    return (static_cast<addr_t>(seg) << 4) + static_cast<addr_t>(off);
 }
 
 void CPUx86::HandleInterrupt(uint8_t no)

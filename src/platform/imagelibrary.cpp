@@ -1,5 +1,4 @@
 #include "imagelibrary.h"
-#include "imageprovider.h"
 #include <fcntl.h>
 #include <unistd.h>
 

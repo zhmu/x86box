@@ -1,5 +1,4 @@
-#ifndef __VGA_H__
-#define __VGA_H__
+#pragma once
 
 #include <memory>
 
@@ -23,5 +22,3 @@ public:
     static constexpr inline unsigned int s_video_width = 640;
     static constexpr inline unsigned int s_video_height = 400;
 };
-
-#endif /* __VGA_H__ */

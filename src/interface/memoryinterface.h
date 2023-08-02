@@ -24,4 +24,6 @@ struct MemoryInterface
     virtual void WriteWord(memory::Address addr, uint16_t data) = 0;
 
     virtual void AddPeripheral(memory::Address base, uint16_t length, MemoryMappedPeripheral& peripheral) = 0;
+
+    virtual void* GetPointer(memory::Address addr, uint16_t length) = 0;
 };

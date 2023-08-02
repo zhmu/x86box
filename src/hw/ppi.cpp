@@ -1,6 +1,6 @@
 #include "ppi.h"
-#include "io.h"
-#include "pit.h"
+#include "../interface/iointerface.h"
+#include "../interface/pitinterface.h"
 
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"

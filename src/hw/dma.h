@@ -1,10 +1,10 @@
 #pragma once
 
 #include <memory>
-#include "dmainterface.h"
+#include "../interface/dmainterface.h"
 
 struct IOInterface;
-class Memory;
+struct MemoryInterface;
 
 class DMA final : public DMAInterface
 {
@@ -15,7 +15,7 @@ private:
     std::unique_ptr<Impl> impl;
 
   public:
-    DMA(IOInterface&, Memory&);
+    DMA(IOInterface&, MemoryInterface&);
     ~DMA();
 
     void Reset();

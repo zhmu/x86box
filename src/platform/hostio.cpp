@@ -2,7 +2,7 @@
 #include <SDL2/SDL.h>
 #include <assert.h>
 #include <deque>
-#include "vga.h"
+#include "../hw/vga.h" // for VGA:s_...
 
 namespace
 {
