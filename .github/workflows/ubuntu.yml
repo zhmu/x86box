@@ -26,3 +26,5 @@ jobs:
       - name: Test
         run: |
             (cd build/test && ./alu_tests)
+            (cd build/test/bus && ./bus_tests)
+            (cd build/test/hw && ./hw_tests)
