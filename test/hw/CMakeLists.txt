@@ -1,0 +1,8 @@
+add_executable(hw_tests main.cpp pic_test.cpp)
+target_include_directories(hw_tests PRIVATE ../../src)
+# TODO put this in a library
+target_sources(hw_tests PRIVATE ../../src/bus/io.cpp)
+target_sources(hw_tests PRIVATE ../../src/hw/dma.cpp)
+target_sources(hw_tests PRIVATE ../../src/hw/pic.cpp)
+target_link_libraries(hw_tests PRIVATE GTest::gtest_main GTest::gmock)
+target_link_libraries(hw_tests PRIVATE spdlog::spdlog argparse)
