@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_subdirectory(external/spdlog-1.11.0)
 add_subdirectory(external/argparse-2.9)
+add_subdirectory(external/googletest-1.14.0)
 
 find_package(SDL2 REQUIRED)
 
