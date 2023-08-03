@@ -55,6 +55,7 @@ struct PIT::Impl : IOPeripheral
     uint8_t control{};
 
     Impl(IOInterface& io);
+    ~Impl();
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
@@ -98,6 +99,11 @@ PIT::Impl::Impl(IOInterface& io)
     : logger(spdlog::stderr_color_st("pit"))
 {
     io.AddPeripheral(io::Base, 4, *this);
+}
+
+PIT::Impl::~Impl()
+{
+    spdlog::drop("pit");
 }
 
 void PIT::Impl::Out8(io_port port, uint8_t val)

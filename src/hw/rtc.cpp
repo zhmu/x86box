@@ -71,6 +71,7 @@ struct RTC::Impl : IOPeripheral
     uint8_t selectedRegister{};
 
     Impl(IOInterface& io);
+    ~Impl();
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
@@ -96,6 +97,11 @@ RTC::Impl::Impl(IOInterface& io)
     : logger(spdlog::stderr_color_st("rtc"))
 {
     io.AddPeripheral(io::Base, 10, *this);
+}
+
+RTC::Impl::~Impl()
+{
+    spdlog::drop("rtc");
 }
 
 void RTC::Impl::Out8(io_port port, uint8_t val)

@@ -105,6 +105,7 @@ struct DMA::Impl : IOPeripheral
     bool flipflop{};
 
     Impl(IOInterface& io, MemoryInterface& memory);
+    ~Impl();
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -140,6 +141,11 @@ DMA::Impl::Impl(IOInterface& io, MemoryInterface& memory)
     io.AddPeripheral(io::Ch1_PageAddr, 1, *this);
     io.AddPeripheral(io::Ch2_PageAddr, 1, *this);
     io.AddPeripheral(io::Ch3_PageAddr, 1, *this);
+}
+
+DMA::Impl::~Impl()
+{
+    spdlog::drop("dma");
 }
 
 void DMA::Impl::Reset()

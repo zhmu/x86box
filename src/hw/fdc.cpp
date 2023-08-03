@@ -174,6 +174,7 @@ struct FDC::Impl : IOPeripheral
     } state = State::Idle;
 
     Impl(PICInterface& pic, DMAInterface& dma, ImageProvider& imageProvider);
+    ~Impl();
     void Reset();
     bool ExecuteCurrentCommand();
 
@@ -200,6 +201,11 @@ FDC::Impl::Impl(PICInterface& pic, DMAInterface& dma, ImageProvider& imageProvid
     : pic(pic), dma(dma), imageProvider(imageProvider)
     , logger(spdlog::stderr_color_st("fdc"))
 {
+}
+
+FDC::Impl::~Impl()
+{
+    spdlog::drop("fdc");
 }
 
 void FDC::Impl::Reset()

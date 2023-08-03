@@ -124,6 +124,7 @@ struct ATA::Impl : IOPeripheral
     std::shared_ptr<spdlog::logger> logger;
 
     Impl(ImageProvider& imageProvider);
+    ~Impl();
     void Reset();
 
     void Out8(io_port port, uint8_t val) override;
@@ -171,6 +172,11 @@ ATA::Impl::Impl(ImageProvider& imageProvider)
     , logger(spdlog::stderr_color_st("ata"))
 {
     // dd if=/dev/zero of=/tmp/hdd.img bs=512 count=62730
+}
+
+ATA::Impl::~Impl()
+{
+    spdlog::drop("ata");
 }
 
 void ATA::Impl::Reset()

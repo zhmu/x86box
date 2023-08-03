@@ -52,6 +52,7 @@ struct PIC::Impl : IOPeripheral
     uint8_t imr{0xff};
 
     Impl(IOInterface& io);
+    ~Impl();
     void SetPendingIRQState(IRQ irq, bool pending);
     std::optional<int> DequeuePendingIRQ();
 
@@ -86,6 +87,11 @@ PIC::Impl::Impl(IOInterface& io)
     : logger(spdlog::stderr_color_st("pic"))
 {
     io.AddPeripheral(io::Base, 2, *this);
+}
+
+PIC::Impl::~Impl()
+{
+    spdlog::drop("pic");
 }
 
 void PIC::Impl::Out8(io_port port, uint8_t val)
@@ -177,7 +183,7 @@ void PIC::Impl::SetPendingIRQState(PIC::IRQ irq, bool pending)
     if (prev_irr != irr)
         logger->info("SetPendingIRQState({:x}, {}) -> irr {:x} (was {:x})", num, pending ? 1 : 0, irr, prev_irr);
 }
- 
+
  std::optional<int> PIC::Impl::DequeuePendingIRQ()
  {
     uint8_t pendingIrqs = (irr & ~isr) & ~imr;

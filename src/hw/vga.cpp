@@ -58,6 +58,7 @@ struct VGA::Impl : MemoryMappedPeripheral, IOPeripheral
     std::array<uint8_t, VideoMemorySize> videomem{};
 
     Impl(MemoryInterface& memory, IOInterface& io, HostIO& hostio);
+    ~Impl();
 
     uint8_t ReadByte(memory::Address addr) override;
     uint16_t ReadWord(memory::Address addr) override;
@@ -81,6 +82,11 @@ VGA::Impl::Impl(MemoryInterface& memory, IOInterface& io, HostIO& hostio)
     memory.AddPeripheral(0xa0000, 65535, *this);
     memory.AddPeripheral(0xb0000, 65535, *this);
     io.AddPeripheral(0x3c0, 31, *this);
+}
+
+VGA::Impl::~Impl()
+{
+    spdlog::drop("vga");
 }
 
 void VGA::Impl::Update()

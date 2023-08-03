@@ -29,6 +29,7 @@ struct Keyboard::Impl : IOPeripheral
     std::deque<uint8_t> scancode;
 
     Impl(IOInterface&, HostIO&);
+    ~Impl();
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -42,6 +43,11 @@ Keyboard::Impl::Impl(IOInterface& io, HostIO& hostio)
 {
     io.AddPeripheral(io::Data, 1, *this);
     io.AddPeripheral(io::Status_Read, 1, *this);
+}
+
+Keyboard::Impl::~Impl()
+{
+    spdlog::drop("keyboard");
 }
 
 Keyboard::Keyboard(IOInterface& io, HostIO& hostio)

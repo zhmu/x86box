@@ -24,12 +24,18 @@ struct IO::Impl
     std::shared_ptr<spdlog::logger> logger;
 
     Impl();
+    ~Impl();
     IOPeripheral* FindPeripheral(const io_port addr);
 };
 
 IO::Impl::Impl()
     : logger(spdlog::stderr_color_st("io"))
 {
+}
+
+IO::Impl::~Impl()
+{
+    spdlog::drop("io");
 }
 
 IOPeripheral* IO::Impl::FindPeripheral(const io_port addr)

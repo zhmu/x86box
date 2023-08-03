@@ -49,6 +49,7 @@ struct PPI::Impl : IOPeripheral
     uint8_t sw{0b0000'0000};
 
     Impl(IOInterface& io, PITInterface& pit);
+    ~Impl();
 
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -74,6 +75,11 @@ PPI::Impl::Impl(IOInterface& io, PITInterface& pit)
     io.AddPeripheral(io::Control, 1, *this);
     io.AddPeripheral(io::Switch, 1, *this);
     io.AddPeripheral(io::NMIMask, 1, *this);
+}
+
+PPI::Impl::~Impl()
+{
+    spdlog::drop("ppi");
 }
 
 void PPI::Impl::Out8(io_port port, uint8_t val)
