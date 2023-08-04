@@ -201,6 +201,7 @@ FDC::Impl::Impl(PICInterface& pic, DMAInterface& dma, ImageProvider& imageProvid
     : pic(pic), dma(dma), imageProvider(imageProvider)
     , logger(spdlog::stderr_color_st("fdc"))
 {
+    Reset();
 }
 
 FDC::Impl::~Impl()
@@ -363,6 +364,7 @@ bool FDC::Impl::ExecuteCurrentCommand()
             if (imageProvider.Read(Image::Floppy0, image_offset + transfer_offset, sector) != sector.size()) {
                 std::fill(sector.begin(), sector.end(), 0xff);
                 logger->critical("read error from floppy0");
+                st0 &= ~st0::InterruptCode1;
                 st0 |= st0::InterruptCode0; // 01: Abnormal termination
                 st1 |= st1::NoData;
                 break;
