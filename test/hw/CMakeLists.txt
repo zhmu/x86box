@@ -1,4 +1,4 @@
-add_executable(hw_tests main.cpp pic_test.cpp)
+add_executable(hw_tests main.cpp pic_test.cpp dma_test.cpp)
 target_include_directories(hw_tests PRIVATE ../../src)
 # TODO put this in a library
 target_sources(hw_tests PRIVATE ../../src/bus/io.cpp)
