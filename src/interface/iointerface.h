@@ -4,6 +4,8 @@ using io_port = uint16_t;
 
 struct IOPeripheral
 {
+    virtual ~IOPeripheral() = default;
+
     virtual void Out8(io_port port, uint8_t val) = 0;
     virtual void Out16(io_port port, uint16_t val) = 0;
     virtual uint8_t In8(io_port port) = 0;
@@ -12,6 +14,8 @@ struct IOPeripheral
 
 struct IOInterface
 {
+    virtual ~IOInterface() = default;
+
     virtual void AddPeripheral(io_port base, uint16_t length, IOPeripheral& peripheral) = 0;
     virtual void Out8(io_port port, uint8_t val) = 0;
     virtual void Out16(io_port port, uint16_t val) = 0;

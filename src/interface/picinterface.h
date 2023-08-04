@@ -4,6 +4,8 @@
 
 struct PICInterface
 {
+    virtual ~PICInterface() = default;
+
     enum class IRQ {
       PIT,
       Keyboard,

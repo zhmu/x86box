@@ -8,6 +8,8 @@ namespace memory
 class MemoryMappedPeripheral
 {
   public:
+    virtual ~MemoryMappedPeripheral() = default;
+
     virtual uint8_t ReadByte(memory::Address addr) = 0;
     virtual uint16_t ReadWord(memory::Address addr) = 0;
 
@@ -17,6 +19,8 @@ class MemoryMappedPeripheral
 
 struct MemoryInterface
 {
+    virtual ~MemoryInterface() = default;
+
     virtual uint8_t ReadByte(memory::Address addr) = 0;
     virtual uint16_t ReadWord(memory::Address addr) = 0;
 
