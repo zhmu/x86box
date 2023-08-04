@@ -12,11 +12,13 @@ namespace
     constexpr inline uint8_t maskEverything = 0xff;
 
     constexpr inline uint32_t dmaAddress = 0x1000;
+    constexpr inline size_t dmaCount = 16;
 
     // OEIS A000108
     constexpr auto dummy_data = std::to_array<uint8_t>({
         0x11, 0x25, 0x14, 0x42, 0x13, 0x24, 0x29, 0x14,
         0x30, 0x48, 0x62, 0x16, 0x79, 0x65, 0x87, 0x86});
+    static_assert(dummy_data.size() == dmaCount);
 
     struct MockMemory : MemoryInterface
     {
@@ -48,8 +50,8 @@ namespace
         io.Out8(0x04, (dmaAddress & 0xff)); // address, bits 7..0
         io.Out8(0x04, (dmaAddress >> 8) & 0xff); // address, bits 15..8
         io.Out8(0x0c, 0xff); // reset master flip-flop
-        io.Out8(0x05, 0x0f); // count, bits 7..0
-        io.Out8(0x05, 0x00); // count, bits 15..8
+        io.Out8(0x05, (dmaCount - 1) & 0xff); // count, bits 7..0
+        io.Out8(0x05, (dmaCount - 1) >> 8); // count, bits 15..8
         io.Out8(0x81, (dmaAddress >> 16) & 0xff); // address, bits 23..16
         io.Out8(0x0a, 0x02); // unmask channel 2
     }
@@ -71,7 +73,7 @@ TEST_F(DMATest, PeripheralToMemoryTransfersTheCorrectData)
     
     SetupDMATransfer(io);
     auto xfer = dma.InitiateTransfer(2);
-    EXPECT_EQ(0x10, xfer->GetTotalLength());
+    EXPECT_EQ(dmaCount, xfer->GetTotalLength());
 
     const auto length = xfer->WriteFromPeripheral(0, dummy_data);
     EXPECT_EQ(dummy_data.size(), length);
