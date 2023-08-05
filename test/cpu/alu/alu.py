@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import struct
+import os
 
 def load_tests_8x8(fname):
-    with open(fname, 'rb') as f:
+    with open(os.path.join('vectors', fname), 'rb') as f:
         t = f.read()
 
     tests = []
@@ -17,7 +18,7 @@ def load_tests_8x8(fname):
     return tests
 
 def load_tests_8(fname):
-    with open(fname, 'rb') as f:
+    with open(os.path.join('vectors', fname), 'rb') as f:
         t = f.read()
 
     tests = []
@@ -29,7 +30,7 @@ def load_tests_8(fname):
     return tests
 
 def load_tests_16(fname):
-    with open(fname, 'rb') as f:
+    with open(os.path.join('vectors', fname), 'rb') as f:
         t = f.read()
 
     tests = []
@@ -41,7 +42,7 @@ def load_tests_16(fname):
     return tests
 
 def load_tests_intn_16(fname):
-    with open(fname, 'rb') as f:
+    with open(os.path.join('vectors', fname), 'rb') as f:
         t = f.read()
 
     tests = []

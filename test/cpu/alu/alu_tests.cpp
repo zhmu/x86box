@@ -478,7 +478,7 @@ namespace
         for (const auto& [ datafile, test_name, test_data ]: tests::all_tests) {
             if (!IsTestActiveInFilter(filter, test_name)) continue;
 
-            const auto test_file = "../../test/"s + std::string(datafile);
+            const auto test_file = "../../../../test/cpu/alu/vectors/"s + std::string(datafile);
             num_errors += std::visit(overload{
                 [&](const tests::Test8x8& test) {
                     const auto test_data = LoadTests8x8(test_file);

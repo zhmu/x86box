@@ -13,7 +13,7 @@ jobs:
         run: |
             sudo apt-get update && \
             sudo apt-get install --assume-yes --no-install-recommends \
-                cmake ninja-build libsdl2-dev libcapstone-dev
+                cmake libsdl2-dev libcapstone-dev
 
       - name: Configure
         uses: threeal/cmake-action@v1.2.0
@@ -25,6 +25,6 @@ jobs:
 
       - name: Test
         run: |
-            (cd build/test && ./alu_tests)
+            (cd build/test/cpu/alu && ./alu_tests)
             (cd build/test/bus && ./bus_tests)
             (cd build/test/hw && ./hw_tests)
