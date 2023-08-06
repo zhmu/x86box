@@ -13,6 +13,7 @@
 #include "hw/fdc.h"
 #include "platform/imagelibrary.h"
 #include "platform/tickprovider.h"
+#include "platform/timeprovider.h"
 
 #include "cpu/disassembler.h"
 
@@ -113,6 +114,7 @@ int main(int argc, char** argv)
 
     auto imageLibrary = std::make_unique<ImageLibrary>();
     auto tick = std::make_unique<TickProvider>();
+    auto time = std::make_unique<TimeProvider>();
     auto memory = std::make_unique<Memory>();
     auto io = std::make_unique<IO>();
     auto x86cpu = std::make_unique<CPUx86>(*memory, *io);
@@ -122,7 +124,7 @@ int main(int argc, char** argv)
     auto pit = std::make_unique<PIT>(*io, *tick);
     auto dma = std::make_unique<DMA>(*io, *memory);
     auto ppi = std::make_unique<PPI>(*io, *pit);
-    auto rtc = std::make_unique<RTC>(*io);
+    auto rtc = std::make_unique<RTC>(*io, *time);
     auto fdc = std::make_unique<FDC>(*io, *pic, *dma, imageLibrary->GetImageProvider());
     auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
     auto keyboard = std::make_unique<Keyboard>(*io, *hostio);

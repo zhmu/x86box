@@ -14,6 +14,7 @@ add_executable(x86box
     hw/fdc.cpp
     platform/imagelibrary.cpp
     platform/tickprovider.cpp
+    platform/timeprovider.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/vgafont.h)
 target_include_directories(x86box PRIVATE ${SDL2_INCLUDE_DIRS})
 target_link_libraries(x86box PRIVATE ${SDL2_LIBRARIES})

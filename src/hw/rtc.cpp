@@ -1,8 +1,8 @@
 #include "rtc.h"
 #include "../interface/iointerface.h"
+#include "../interface/timeinterface.h"
 
 #include <array>
-#include <ctime>
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
@@ -37,28 +37,27 @@ namespace
         return (v / 10) * 16 + (v % 10);
     }
 
-    uint8_t ReadRtc(const uint8_t reg)
+    uint8_t ReadRtc(const uint8_t reg, TimeInterface& time)
     {
-        const auto t = time(nullptr);
-        const auto tm = localtime(&t);
+        const auto t = time.GetLocalTime();
         switch(reg)
         {
             case rtc_register::Seconds:
-                return ValueToBcd(tm->tm_sec);
+                return ValueToBcd(t.seconds);
             case rtc_register::Minutes:
-                return ValueToBcd(tm->tm_min);
+                return ValueToBcd(t.minutes);
             case rtc_register::Hours:
-                return ValueToBcd(tm->tm_hour);
+                return ValueToBcd(t.hours);
             case rtc_register::DayOfWeek:
-                return ValueToBcd(tm->tm_wday + 1);
+                return ValueToBcd(t.week_day);
             case rtc_register::DayOfMonth:
-                return ValueToBcd(tm->tm_mday);
+                return ValueToBcd(t.day);
             case rtc_register::Month:
-                return ValueToBcd(tm->tm_mon + 1);
+                return ValueToBcd(t.month);
             case rtc_register::Year:
-                return ValueToBcd(tm->tm_year % 100);
+                return ValueToBcd(t.year % 100);
             case rtc_register::Century:
-                return ValueToBcd((tm->tm_year + 1900) / 100);
+                return ValueToBcd(t.year / 100);
         }
         return 0;
     }
@@ -66,11 +65,12 @@ namespace
 
 struct RTC::Impl : IOPeripheral
 {
+    TimeInterface& time;
     std::shared_ptr<spdlog::logger> logger;
     std::array<uint8_t, 0x2f> cmosData{};
     uint8_t selectedRegister{};
 
-    Impl(IOInterface& io);
+    Impl(IOInterface& io, TimeInterface& time);
     ~Impl();
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
@@ -78,8 +78,8 @@ struct RTC::Impl : IOPeripheral
     uint16_t In16(io_port port) override;
 };
 
-RTC::RTC(IOInterface& io)
-    : impl(std::make_unique<Impl>(io))
+RTC::RTC(IOInterface& io, TimeInterface& time)
+    : impl(std::make_unique<Impl>(io, time))
 {
 }
 
@@ -93,8 +93,9 @@ void RTC::Reset()
     impl->cmosData[0x10] = 0x40;
 }
 
-RTC::Impl::Impl(IOInterface& io)
-    : logger(spdlog::stderr_color_st("rtc"))
+RTC::Impl::Impl(IOInterface& io, TimeInterface& time)
+    : time(time)
+    , logger(spdlog::stderr_color_st("rtc"))
 {
     io.AddPeripheral(io::Base, 10, *this);
 }
@@ -125,7 +126,7 @@ uint8_t RTC::Impl::In8(io_port port)
     switch(port) {
         case io::Data:
             if (selectedRegister < rtc_register::StatusA || selectedRegister == rtc_register::Century) {
-                return ReadRtc(selectedRegister);
+                return ReadRtc(selectedRegister, time);
             }
             return cmosData[selectedRegister % cmosData.size()];
     }
