@@ -5,6 +5,7 @@
 #include "../interface/pitinterface.h"
 
 struct IOInterface;
+struct TickInterface;
 
 class PIT final : public PITInterface
 {
@@ -12,7 +13,7 @@ class PIT final : public PITInterface
     std::unique_ptr<Impl> impl;
 
   public:
-    PIT(IOInterface& io);
+    PIT(IOInterface& io, TickInterface& tick);
     ~PIT();
 
     void Reset();

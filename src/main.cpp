@@ -12,6 +12,7 @@
 #include "hw/rtc.h"
 #include "hw/fdc.h"
 #include "platform/imagelibrary.h"
+#include "platform/tickprovider.h"
 
 #include "cpu/disassembler.h"
 
@@ -111,13 +112,14 @@ int main(int argc, char** argv)
     spdlog::cfg::load_env_levels();
 
     auto imageLibrary = std::make_unique<ImageLibrary>();
+    auto tick = std::make_unique<TickProvider>();
     auto memory = std::make_unique<Memory>();
     auto io = std::make_unique<IO>();
     auto x86cpu = std::make_unique<CPUx86>(*memory, *io);
     auto hostio = std::make_unique<HostIO>();
     auto ata = std::make_unique<ATA>(*io, imageLibrary->GetImageProvider());
     auto pic = std::make_unique<PIC>(*io);
-    auto pit = std::make_unique<PIT>(*io);
+    auto pit = std::make_unique<PIT>(*io, *tick);
     auto dma = std::make_unique<DMA>(*io, *memory);
     auto ppi = std::make_unique<PPI>(*io, *pit);
     auto rtc = std::make_unique<RTC>(*io);

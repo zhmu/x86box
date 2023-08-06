@@ -1,5 +1,6 @@
 #include "pit.h"
 #include "../interface/iointerface.h"
+#include "../interface/tickinterface.h"
 
 #include <array>
 #include <chrono>
@@ -40,7 +41,7 @@ struct PIT::Impl : IOPeripheral
         bool active{};
         bool current_output{};
         // When was the count last set?
-        std::chrono::steady_clock::time_point count_time{};
+        std::chrono::nanoseconds count_time{};
 
         enum class State {
             LoByte,
@@ -50,22 +51,23 @@ struct PIT::Impl : IOPeripheral
         } state{State::LoByte};
     };
 
+    TickInterface& tick;
     std::shared_ptr<spdlog::logger> logger;
     std::array<Channel, 3> channel;
     uint8_t control{};
 
-    Impl(IOInterface& io);
+    Impl(IOInterface& io, TickInterface& tick);
     ~Impl();
     void Out8(io_port port, uint8_t val) override;
     void Out16(io_port port, uint16_t val) override;
     uint8_t In8(io_port port) override;
     uint16_t In16(io_port port) override;
 
-    bool TickChannel(size_t ch_num, std::chrono::steady_clock::time_point now);
+    bool TickChannel(size_t ch_num, std::chrono::nanoseconds now);
 };
 
-PIT::PIT(IOInterface& io)
-    : impl(std::make_unique<Impl>(io))
+PIT::PIT(IOInterface& io, TickInterface& tick)
+    : impl(std::make_unique<Impl>(io, tick))
 {
 }
 
@@ -79,7 +81,7 @@ void PIT::Reset()
 
  bool PIT::Tick()
  {
-    const auto now = std::chrono::steady_clock::now();;
+    const auto now = impl->tick.GetTickCount();
 
     bool signal_irq = false;
     for(size_t ch_num = 0; ch_num < impl->channel.size(); ++ch_num)
@@ -95,8 +97,9 @@ void PIT::Reset()
     return signal_irq;
 }
 
-PIT::Impl::Impl(IOInterface& io)
+PIT::Impl::Impl(IOInterface& io, TickInterface& tick)
     : logger(spdlog::stderr_color_st("pit"))
+    , tick(tick)
 {
     io.AddPeripheral(io::Base, 4, *this);
 }
@@ -152,12 +155,12 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
                 case Channel::State::HiByte:
                     ch.reload = static_cast<uint16_t>(val) << 8;
                     ch.active = true;
-                    ch.count_time = std::chrono::steady_clock::now();;
+                    ch.count_time = tick.GetTickCount();
                     break;
                 case Channel::State::LoAndHi2:
                     ch.reload = (ch.reload & 0x00ff) | (static_cast<uint16_t>(val) << 8);
                     ch.active = true;
-                    ch.count_time = std::chrono::steady_clock::now();;
+                    ch.count_time = tick.GetTickCount();
                     break;
                 case Channel::State::LoAndHi1:
                     ch.reload = (ch.reload & 0xff00) | val;
@@ -166,7 +169,7 @@ void PIT::Impl::Out8(io_port port, uint8_t val)
                 case Channel::State::LoByte:
                     ch.reload = val;
                     ch.active = true;
-                    ch.count_time = std::chrono::steady_clock::now();;
+                    ch.count_time = tick.GetTickCount();
                     ch.state = Channel::State::LoAndHi1;
                     break;
             }
@@ -207,14 +210,13 @@ uint16_t PIT::Impl::In16(io_port port)
     return 0;
 }
 
-bool PIT::Impl::TickChannel(size_t ch_num, std::chrono::steady_clock::time_point now)
+bool PIT::Impl::TickChannel(size_t ch_num, std::chrono::nanoseconds now)
 {
     auto& ch = channel[ch_num];
     if (!ch.active) return false;
 
     // Compute current channel count - we need to go from absolute delta (in ns) to PIT counts
-    const uint64_t count =
-        (std::chrono::duration_cast<std::chrono::nanoseconds>(now - ch.count_time).count() * pitFrequency) / 1'000'000'000;
+    const uint64_t count = ((now - ch.count_time).count() * pitFrequency) / 1'000'000'000;
     bool output = false;
     switch(ch.mode)
     {
