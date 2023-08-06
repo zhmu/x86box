@@ -81,6 +81,7 @@ struct RTC::Impl : IOPeripheral
 RTC::RTC(IOInterface& io, TimeInterface& time)
     : impl(std::make_unique<Impl>(io, time))
 {
+    Reset();
 }
 
 RTC::~RTC() = default;
