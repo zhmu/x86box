@@ -28,3 +28,8 @@ jobs:
             (cd build/test/cpu/alu && ./alu_tests)
             (cd build/test/bus && ./bus_tests)
             (cd build/test/hw && ./hw_tests)
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        env:
+            CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
