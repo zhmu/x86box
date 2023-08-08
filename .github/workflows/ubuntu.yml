@@ -13,7 +13,8 @@ jobs:
         run: |
             sudo apt-get update && \
             sudo apt-get install --assume-yes --no-install-recommends \
-                cmake libsdl2-dev libcapstone-dev
+                cmake libsdl2-dev libcapstone-dev \
+                gcovr
 
       - name: Configure
         uses: threeal/cmake-action@v1.2.0
@@ -25,9 +26,20 @@ jobs:
 
       - name: Test
         run: |
+            (cd build/test/cpu && ./cpu_tests)
             (cd build/test/cpu/alu && ./alu_tests)
             (cd build/test/bus && ./bus_tests)
             (cd build/test/hw && ./hw_tests)
+
+      - name: Configure codecoverage build
+        uses: threeal/cmake-action@v1.2.0
+        with:
+            generator: Ninja
+            build-dir: build-codecoverage
+            options: ENABLE_CODE_COVERAGE:BOOL=TRUE CMAKE_BUILD_TYPE=Debug
+
+      - name: Build/run codecoverage
+        run: cmake --build build-codecoverage --target coverage
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v3

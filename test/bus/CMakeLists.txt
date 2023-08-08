@@ -5,3 +5,6 @@ target_sources(bus_tests PRIVATE ../../src/bus/io.cpp)
 target_sources(bus_tests PRIVATE ../../src/bus/memory.cpp)
 target_link_libraries(bus_tests PRIVATE GTest::gtest_main GTest::gmock)
 target_link_libraries(bus_tests PRIVATE spdlog::spdlog argparse)
+
+include(GoogleTest)
+gtest_discover_tests(bus_tests)

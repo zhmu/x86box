@@ -7,3 +7,6 @@ target_sources(cpu_tests PRIVATE ../../src/cpu/cpux86.cpp)
 target_sources(cpu_tests PRIVATE ../../src/bus/memory.cpp)
 target_link_libraries(cpu_tests PRIVATE GTest::gtest_main GTest::gmock)
 target_link_libraries(cpu_tests PRIVATE spdlog::spdlog)
+
+include(GoogleTest)
+gtest_discover_tests(cpu_tests)

@@ -10,3 +10,6 @@ target_sources(hw_tests PRIVATE ../../src/hw/pit.cpp)
 target_sources(hw_tests PRIVATE ../../src/hw/rtc.cpp)
 target_link_libraries(hw_tests PRIVATE GTest::gtest_main GTest::gmock)
 target_link_libraries(hw_tests PRIVATE spdlog::spdlog argparse)
+
+include(GoogleTest)
+gtest_discover_tests(hw_tests)
