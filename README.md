@@ -58,7 +58,7 @@ The `tests/` directory contains the testsuite of the emulator. This is intended 
 
 The following list is a _preliminary_ goal per version:
 
-- Version 0.1: Boots MS-DOS 6.22 from floppy. Installs to a hard drive. Boots from hard drive.
+- [Version 0.1](https://github.com/zhmu/x86box/releases/tag/release%2F0.1): Boots MS-DOS 6.22 from floppy. Installs to a hard drive. Boots from hard drive.
 - Version 0.2: Boots FreeDOS 1.3 from floppy. Installs to a hard drive. Boots from hard drive.
 - Version 0.3: Runs Commander Keen 4
 - Version 0.4: Runs Wolfenstein 3D (needs 286 support)
