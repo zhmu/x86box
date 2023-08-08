@@ -17,6 +17,7 @@ class CPUx86
     void RunInstruction();
     void Reset();
 
+    cpu::State& GetState() { return m_State; }
     const cpu::State& GetState() const { return m_State; }
 
     static addr_t MakeAddr(uint16_t seg, uint16_t off);

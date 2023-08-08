@@ -5,7 +5,7 @@
 #include <memory>
 #include "../interface/memoryinterface.h"
 
-class Memory final : public MemoryInterface
+class Memory : public MemoryInterface
 {
     struct Impl;
     std::unique_ptr<Impl> impl;
