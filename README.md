@@ -1,6 +1,6 @@
 # x86box
 
-[![ubuntu workflow status](https://github.com/zhmu/x86box/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/zhmu/x86box/actions?query=workflow%3Aubuntu)
+[![ubuntu workflow status](https://github.com/zhmu/x86box/actions/workflows/ubuntu.yml/badge.svg)](https://github.com/zhmu/x86box/actions?query=workflow%3Aubuntu) [![codecov](https://codecov.io/gh/zhmu/x86box/branch/main/graph/badge.svg?token=X5CI98JBBM)](https://codecov.io/gh/zhmu/x86box)
 
 ## Introduction
 
