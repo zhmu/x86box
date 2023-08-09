@@ -22,9 +22,10 @@ if(ENABLE_CODE_COVERAGE)
 setup_target_for_coverage_gcovr_xml(
         NAME coverage
         EXECUTABLE ctest
-        EXCLUDE "external/*"
+        EXCLUDE "external/*" "test/*"
         DEPENDENCIES
-            bus_tests
+            alu_tests
             cpu_tests
+            bus_tests
             hw_tests)
 endif()

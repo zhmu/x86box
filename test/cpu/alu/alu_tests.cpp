@@ -11,6 +11,10 @@
 #include <type_traits>
 #include <unistd.h>
 
+#define GTEST_DONT_DEFINE_TEST 1
+#include "gtest/gtest.h"
+#include "gmock/gmock.h"
+
 using namespace std::literals::string_literals;
 
 namespace
@@ -466,18 +470,10 @@ namespace
         };
     }
 
-    bool IsTestActiveInFilter(const std::vector<std::string>& filter, std::string_view test_name)
-    {
-        if (filter.empty()) return true;
-        return std::find_if(filter.begin(), filter.end(), [&](const auto& s) { return s == test_name; }) != filter.end();
-    }
-
-    int RunTests(const std::vector<std::string>& filter)
+    int RunTests()
     {
         int num_errors = 0;
         for (const auto& [ datafile, test_name, test_data ]: tests::all_tests) {
-            if (!IsTestActiveInFilter(filter, test_name)) continue;
-
             const auto test_file = "../../../../test/cpu/alu/vectors/"s + std::string(datafile);
             num_errors += std::visit(overload{
                 [&](const tests::Test8x8& test) {
@@ -533,51 +529,10 @@ namespace
         }
         return num_errors;
     }
-
-    void ListTests()
-    {
-        for (const auto& [ datafile, test_name, test_data ]: tests::all_tests) {
-            std::cout << test_name << '\n';
-        }
-    }
 }
 
-int main(int argc, char* argv[])
+GTEST_TEST(ALUTest, AllTests)
 {
-    std::vector<std::string> enabled_tests;
-    while (true) {
-        const int opt = getopt(argc, argv, "l");
-        if (opt < 0) break;
-        switch(opt) {
-            case 'l':
-                ListTests();
-                return 0;
-            default:
-                std::cerr << "usage: " << argv[0] << " -l tests...\n"
-                          << "\n"
-                          << "  -l     list all available tests\n"
-                          << '\n'
-                          << "provide test names to run only test tests\n"
-                          << "the entire test name must match\n";
-                return EXIT_FAILURE;
-        }
-    }
-
-    for(; optind < argc; ++optind) {
-        std::string test_name{ argv[optind] };
-        if (std::find_if(tests::all_tests.begin(), tests::all_tests.end(), [&](const auto& v) { return std::get<1>(v) == test_name; }) == tests::all_tests.end()) {
-            std::cout << "test '" << test_name << "' unrecognized, aborting\n";
-            return EXIT_FAILURE;
-        }
-        enabled_tests.push_back(std::move(test_name));
-    }
-
-    const auto num_errors = RunTests(enabled_tests);
-    if (num_errors == 0) {
-        std::cout << "Everything OK!\n";
-        return 0;
-    } else {
-        std::cout << "Failure, " << num_errors << " error(s) encountered\n";
-        return 1;
-    }
+    const auto num_errors = RunTests();
+    EXPECT_EQ(num_errors, 0);
 }
