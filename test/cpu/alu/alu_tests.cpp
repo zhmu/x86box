@@ -369,170 +369,309 @@ namespace
         >;
 
         using TestVector = std::tuple<std::string_view, std::string_view, TestType>;
-
-        constexpr std::array all_tests{
-            TestVector{"add8.bin", "add", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::ADD<8>(flags, a, b);
-            } } },
-            TestVector{"sub8.bin", "sub", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::SUB<8>(flags, a, b);
-            } } },
-            TestVector{"adc8.bin", "adc", Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::ADC<8>(flags, a, b);
-            } } },
-            TestVector{"sbb8.bin", "sbb", Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::SBB<8>(flags, a, b);
-            } } },
-            TestVector{"shl8_1.bin", "shl1", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::SHL<8>(flags, a, 1);
-            } } },
-            TestVector{"shl8_8.bin", "shl", Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
-                return cpu::alu::SHL<8>(flags, a, b);
-            }, } },
-            TestVector{"shr8_1.bin", "shr1", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::SHR<8>(flags, a, 1);
-            } } },
-            TestVector{"shr8_8.bin", "shr", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::SHR<8>(flags, a, b);
-            } } },
-            TestVector{"sar8_1.bin", "sar1", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::SAR<8>(flags, a, 1);
-            } } },
-            TestVector{"sar8_8.bin", "sar", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::SAR<8>(flags, a, b);
-            } } },
-            TestVector{"rol8_1.bin", "rol1", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::ROL<8>(flags, a, 1);
-            } } },
-            TestVector{"rol8_8.bin", "rol", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::ROL<8>(flags, a, b);
-            } } },
-            TestVector{"ror8_1.bin", "ror1", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::ROR<8>(flags, a, 1);
-            } } },
-            TestVector{"ror8_8.bin", "ror", Test8x8{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::ROR<8>(flags, a, b);
-            } } },
-            TestVector{"rcl8_1.bin", "rcl1", Test8WithCarry{ [](auto& flags, auto a) {
-                return cpu::alu::RCL<8>(flags, a, 1);
-            } } },
-            TestVector{"rcl8_8.bin", "rcl", Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::RCL<8>(flags, a, b);
-            } } },
-            TestVector{"rcr8_1.bin", "rcr1", Test8WithCarry{ [](auto& flags, auto a) {
-                return cpu::alu::RCR<8>(flags, a, 1);
-            } } },
-            TestVector{"rcr8_8.bin", "rcr", Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
-                return cpu::alu::RCR<8>(flags, a, b);
-            } } },
-            TestVector{"or8.bin", "or8", Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
-                return cpu::alu::OR<8>(flags, a, b);
-            } } },
-            TestVector{"and8.bin", "and8", Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
-                return cpu::alu::AND<8>(flags, a, b);
-            } } },
-            TestVector{"xor8.bin", "xor8", Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
-                return cpu::alu::XOR<8>(flags, a, b);
-            } } },
-            TestVector{"inc8.bin", "inc", Test8WithCarry{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::INC<8>(flags, a);
-            } } },
-            TestVector{"dec8.bin", "dec", Test8WithCarry{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::DEC<8>(flags, a);
-            } } },
-            TestVector{"neg8.bin", "neg", Test8{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::NEG<8>(flags, a);
-            } } },
-            TestVector{"daa.bin", "daa", Test8WithCarryAndAuxCarry{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::DAA(flags, a);
-            } } },
-            TestVector{"das.bin", "das", Test8WithCarryAndAuxCarry{ [](auto& flags, auto a) -> uint8_t {
-                return cpu::alu::DAS(flags, a);
-            } } },
-            TestVector{"aaa.bin", "aaa", Test16WithAuxCarry{ [](auto& flags, auto a) -> uint16_t {
-                return cpu::alu::AAA(flags, a);
-            } } },
-            TestVector{"aas.bin", "aas", Test16WithAuxCarry{ [](auto& flags, auto a) -> uint16_t {
-                return cpu::alu::AAS(flags, a);
-            } } },
-            TestVector{"aam.bin", "aam", Test8x8WithIntn{ [](auto& flags, auto& intn, auto a, auto b) -> uint16_t {
-                uint16_t ax = a;
-                const auto result = cpu::alu::AAM(flags, ax, b);
-                if (!result) {
-                    intn = 0;
-                    return ax;
-                }
-                return *result;
-            } } },
-            TestVector{"aad.bin", "aad", Test8x8To16{ [](auto& flags, auto a, auto b) -> uint16_t {
-                return cpu::alu::AAD(flags, a, b);
-            } } },
-        };
     }
 
-    int RunTests()
+    int RunTest(const tests::TestVector& test_vector)
     {
-        int num_errors = 0;
-        for (const auto& [ datafile, test_name, test_data ]: tests::all_tests) {
-            const auto test_file = "../../../../test/cpu/alu/vectors/"s + std::string(datafile);
-            num_errors += std::visit(overload{
-                [&](const tests::Test8x8& test) {
-                    const auto test_data = LoadTests8x8(test_file);
-                    return VerifyOp8x8(test_data, test_name, test.fn, cpu::flag::ON);
-                },
-                [&](const tests::Test8x8WithCarry& test) {
-                    const auto [ test_data_without_carry, test_data_with_carry]  = LoadTests8x8WithCarry(test_file);
-                    return
-                        VerifyOp8x8(test_data_without_carry, test_name, test.fn, cpu::flag::ON) +
-                        VerifyOp8x8(test_data_with_carry, test_name, test.fn, cpu::flag::ON | cpu::flag::CF);
-                },
-                [&](const tests::Test8& test) {
-                    const auto test_data = LoadTests8(test_file);
-                    return VerifyOp8(test_data, test_name, test.fn, cpu::flag::ON);
-                },
-                [&](const tests::Test8WithCarry& test) {
-                    const auto [ test_data_without_carry, test_data_with_carry]  = LoadTests8WithCarry(test_file);
-                    return
-                        VerifyOp8(test_data_without_carry, test_name, test.fn, cpu::flag::ON) +
-                        VerifyOp8(test_data_with_carry, test_name, test.fn, cpu::flag::ON | cpu::flag::CF);
-                },
-                [&](const tests::Test8WithAuxCarry& test) {
-                    const auto [ test_data_0, test_data_af ]  = LoadTests8WithCarry(test_file);
-                    return
-                        VerifyOp8(test_data_0, test_name, test.fn, cpu::flag::ON) +
-                        VerifyOp8(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF);
-                },
-                [&](const tests::Test8WithCarryAndAuxCarry& test) {
-                    const auto [ test_data_0, test_data_cf, test_data_af, test_data_cf_af ]  = LoadTests8WithCarryAndAuxCarry(test_file);
-                    return
-                        VerifyOp8(test_data_0, test_name, test.fn, cpu::flag::ON) +
-                        VerifyOp8(test_data_cf, test_name, test.fn, cpu::flag::ON | cpu::flag::CF) +
-                        VerifyOp8(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF) +
-                        VerifyOp8(test_data_cf_af, test_name, test.fn, cpu::flag::ON | cpu::flag::CF | cpu::flag::AF);
-                },
-                [&](const tests::Test16WithAuxCarry& test) {
-                    const auto [ test_data_0, test_data_af ]  = LoadTests16WithCarry(test_file);
-                    return
-                        VerifyOp16(test_data_0, test_name, test.fn, cpu::flag::ON) +
-                        VerifyOp16(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF);
-                },
-                [&](const tests::Test8x8WithIntn& test) {
-                    const auto test_data = LoadTestsIntn8x8(test_file);
-                    return
-                        VerifyOp8x8Intn(test_data, test_name, test.fn, cpu::flag::ON);
-                },
-                [&](const tests::Test8x8To16& test) {
-                    const auto test_data = LoadTests8x8To16(test_file);
-                    return VerifyOp8x8To16(test_data, test_name, test.fn, cpu::flag::ON);
-                },
-            }, test_data);
-        }
-        return num_errors;
+        const auto& [ datafile, test_name, test_data ] = test_vector;
+        const auto test_file = "../../../../test/cpu/alu/vectors/"s + std::string(datafile);
+        return std::visit(overload{
+            [&](const tests::Test8x8& test) {
+                const auto test_data = LoadTests8x8(test_file);
+                return VerifyOp8x8(test_data, test_name, test.fn, cpu::flag::ON);
+            },
+            [&](const tests::Test8x8WithCarry& test) {
+                const auto [ test_data_without_carry, test_data_with_carry]  = LoadTests8x8WithCarry(test_file);
+                return
+                    VerifyOp8x8(test_data_without_carry, test_name, test.fn, cpu::flag::ON) +
+                    VerifyOp8x8(test_data_with_carry, test_name, test.fn, cpu::flag::ON | cpu::flag::CF);
+            },
+            [&](const tests::Test8& test) {
+                const auto test_data = LoadTests8(test_file);
+                return VerifyOp8(test_data, test_name, test.fn, cpu::flag::ON);
+            },
+            [&](const tests::Test8WithCarry& test) {
+                const auto [ test_data_without_carry, test_data_with_carry]  = LoadTests8WithCarry(test_file);
+                return
+                    VerifyOp8(test_data_without_carry, test_name, test.fn, cpu::flag::ON) +
+                    VerifyOp8(test_data_with_carry, test_name, test.fn, cpu::flag::ON | cpu::flag::CF);
+            },
+            [&](const tests::Test8WithAuxCarry& test) {
+                const auto [ test_data_0, test_data_af ]  = LoadTests8WithCarry(test_file);
+                return
+                    VerifyOp8(test_data_0, test_name, test.fn, cpu::flag::ON) +
+                    VerifyOp8(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF);
+            },
+            [&](const tests::Test8WithCarryAndAuxCarry& test) {
+                const auto [ test_data_0, test_data_cf, test_data_af, test_data_cf_af ]  = LoadTests8WithCarryAndAuxCarry(test_file);
+                return
+                    VerifyOp8(test_data_0, test_name, test.fn, cpu::flag::ON) +
+                    VerifyOp8(test_data_cf, test_name, test.fn, cpu::flag::ON | cpu::flag::CF) +
+                    VerifyOp8(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF) +
+                    VerifyOp8(test_data_cf_af, test_name, test.fn, cpu::flag::ON | cpu::flag::CF | cpu::flag::AF);
+            },
+            [&](const tests::Test16WithAuxCarry& test) {
+                const auto [ test_data_0, test_data_af ]  = LoadTests16WithCarry(test_file);
+                return
+                    VerifyOp16(test_data_0, test_name, test.fn, cpu::flag::ON) +
+                    VerifyOp16(test_data_af, test_name, test.fn, cpu::flag::ON | cpu::flag::AF);
+            },
+            [&](const tests::Test8x8WithIntn& test) {
+                const auto test_data = LoadTestsIntn8x8(test_file);
+                return
+                    VerifyOp8x8Intn(test_data, test_name, test.fn, cpu::flag::ON);
+            },
+            [&](const tests::Test8x8To16& test) {
+                const auto test_data = LoadTests8x8To16(test_file);
+                return VerifyOp8x8To16(test_data, test_name, test.fn, cpu::flag::ON);
+            },
+        }, test_data);
     }
 }
 
-GTEST_TEST(ALUTest, AllTests)
+GTEST_TEST(ALUTest, Add)
 {
-    const auto num_errors = RunTests();
+    const auto num_errors = RunTest({"add8.bin", "add", tests::Test8x8{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::ADD<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Sub)
+{
+    const auto num_errors = RunTest({"sub8.bin", "sub", tests::Test8x8{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::SUB<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Adc)
+{
+    const auto num_errors = RunTest({"adc8.bin", "adc", tests::Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
+                return cpu::alu::ADC<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Sbb)
+{
+    const auto num_errors = RunTest({"sbb8.bin", "sbb", tests::Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::SBB<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+
+GTEST_TEST(ALUTest, Shl8_1)
+{
+    const auto num_errors = RunTest({"shl8_1.bin", "shl1", tests::Test8{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::SHL<8>(flags, a, 1);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Shl8_8)
+{
+    const auto num_errors = RunTest({"shl8_8.bin", "shl", tests::Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
+        return cpu::alu::SHL<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Shr8_1)
+{
+    const auto num_errors = RunTest({"shr8_1.bin", "shr1", tests::Test8{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::SHR<8>(flags, a, 1);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Shr8_8)
+{
+    const auto num_errors = RunTest({"shr8_8.bin", "shr", tests::Test8x8{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::SHR<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Sar8_1)
+{
+    const auto num_errors = RunTest({"sar8_1.bin", "sar1", tests::Test8{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::SAR<8>(flags, a, 1);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Sar8_8)
+{
+    const auto num_errors = RunTest({"sar8_8.bin", "sar", tests::Test8x8{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::SAR<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Rol8_1)
+{
+    const auto num_errors = RunTest({"rol8_1.bin", "rol1", tests::Test8{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::ROL<8>(flags, a, 1);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Rol8)
+{
+    const auto num_errors = RunTest({"rol8_8.bin", "rol", tests::Test8x8{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::ROL<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Ror1)
+{
+    const auto num_errors = RunTest({"ror8_1.bin", "ror1", tests::Test8{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::ROR<8>(flags, a, 1);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Ror)
+{
+    const auto num_errors = RunTest({"ror8_8.bin", "ror", tests::Test8x8{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::ROR<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Rcl1)
+{
+    const auto num_errors = RunTest({"rcl8_1.bin", "rcl1", tests::Test8WithCarry{ [](auto& flags, auto a) {
+        return cpu::alu::RCL<8>(flags, a, 1);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Rcl)
+{
+    const auto num_errors = RunTest({"rcl8_8.bin", "rcl", tests::Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::RCL<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Rcr1)
+{
+    const auto num_errors = RunTest({"rcr8_1.bin", "rcr1", tests::Test8WithCarry{ [](auto& flags, auto a) {
+        return cpu::alu::RCR<8>(flags, a, 1);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Rcr)
+{
+    const auto num_errors = RunTest({"rcr8_8.bin", "rcr", tests::Test8x8WithCarry{ [](auto& flags, auto a, auto b) {
+        return cpu::alu::RCR<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Or)
+{
+    const auto num_errors = RunTest({"or8.bin", "or8", tests::Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
+        return cpu::alu::OR<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, And)
+{
+    const auto num_errors = RunTest({"and8.bin", "and8", tests::Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
+        return cpu::alu::AND<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Xor)
+{
+    const auto num_errors = RunTest({"xor8.bin", "xor8", tests::Test8x8{ [](auto& flags, auto a, auto b) -> uint8_t {
+        return cpu::alu::XOR<8>(flags, a, b);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Inc)
+{
+    const auto num_errors = RunTest({"inc8.bin", "inc", tests::Test8WithCarry{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::INC<8>(flags, a);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Dec)
+{
+    const auto num_errors = RunTest({"dec8.bin", "dec", tests::Test8WithCarry{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::DEC<8>(flags, a);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Neg)
+{
+    const auto num_errors = RunTest({"neg8.bin", "neg", tests::Test8{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::NEG<8>(flags, a);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Daa)
+{
+    const auto num_errors = RunTest( {"daa.bin", "daa", tests::Test8WithCarryAndAuxCarry{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::DAA(flags, a);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Das)
+{
+    const auto num_errors = RunTest({"das.bin", "das", tests::Test8WithCarryAndAuxCarry{ [](auto& flags, auto a) -> uint8_t {
+        return cpu::alu::DAS(flags, a);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Aaa)
+{
+    const auto num_errors = RunTest({"aaa.bin", "aaa", tests::Test16WithAuxCarry{ [](auto& flags, auto a) -> uint16_t {
+        return cpu::alu::AAA(flags, a);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Aas)
+{
+    const auto num_errors = RunTest({"aas.bin", "aas", tests::Test16WithAuxCarry{ [](auto& flags, auto a) -> uint16_t {
+        return cpu::alu::AAS(flags, a);
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Aam)
+{
+    const auto num_errors = RunTest({"aam.bin", "aam", tests::Test8x8WithIntn{ [](auto& flags, auto& intn, auto a, auto b) -> uint16_t {
+        uint16_t ax = a;
+        const auto result = cpu::alu::AAM(flags, ax, b);
+        if (!result) {
+            intn = 0;
+            return ax;
+        }
+        return *result;
+    } } });
+    EXPECT_EQ(num_errors, 0);
+}
+
+GTEST_TEST(ALUTest, Aad)
+{
+    const auto num_errors = RunTest({"aad.bin", "aad", tests::Test8x8To16{ [](auto& flags, auto a, auto b) -> uint16_t {
+        return cpu::alu::AAD(flags, a, b);
+    } } });
     EXPECT_EQ(num_errors, 0);
 }
