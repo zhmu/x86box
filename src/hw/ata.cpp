@@ -116,6 +116,13 @@ namespace
         // https://en.wikipedia.org/wiki/Logical_block_addressing
         return (cyl * NumHeads + head) * SectorsPerTrack + (sector - 1);
     }
+
+    std::optional<Image> SelectedDeviceToImage(ImageProvider& imageProvider, int selected_device)
+    {
+        const auto image = (selected_device == 0) ? Image::Harddisk0 : Image::Harddisk1;
+        if (imageProvider.GetSize(image) == 0) return {};
+        return image;
+    }
 }
 
 struct ATA::Impl : IOPeripheral
@@ -205,9 +212,8 @@ void ATA::Impl::Out8(io_port port, uint8_t val)
                 ++sector_data_offset;
 
                 if (sector_data_offset == sector_data.size()) {
-                    logger->warn("out8: Sector completed");
-
-                    if (imageProvider.Write(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
+                    const auto image = SelectedDeviceToImage(imageProvider, selected_device);
+                    if (!image || imageProvider.Write(*image, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
                         logger->critical("write error!!!");
                     }
 
@@ -268,7 +274,8 @@ uint8_t ATA::Impl::In8(io_port port)
                     --sectors_left;
                     if (sectors_left > 0) {
                         ++current_lba;
-                        if (imageProvider.Read(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
+                        const auto image = SelectedDeviceToImage(imageProvider, selected_device);
+                        if (!image || imageProvider.Read(*image, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
                             logger->critical("read error!!!");
                             std::fill(sector_data.begin(), sector_data.end(), 0xff);
                         }
@@ -304,7 +311,8 @@ uint8_t ATA::Impl::In8(io_port port)
             break;
         case io::AltStatus: {
             uint8_t status = 0;
-            status |= status::Ready;
+            if (SelectedDeviceToImage(imageProvider, selected_device))
+                status |= status::Ready;
             if (sector_data_offset < sector_data.size())
                 status |= status::DataRequest;
             if (error != 0)
@@ -334,11 +342,11 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             logger->info("command: Read Sectors ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
 
-
             current_lba = CHStoLBA(cylinder, head, sector_nr);
 
             logger->info("read from c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
-            if (imageProvider.Read(Image::Harddisk0, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
+            const auto image = SelectedDeviceToImage(imageProvider, selected_device);
+            if (!image || imageProvider.Read(*image, current_lba * sector_data.size(), sector_data) != sector_data.size()) {
                 logger->critical("read error!!!");
                 std::fill(sector_data.begin(), sector_data.end(), 0xff);
             }
@@ -358,7 +366,7 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
             logger->info("command: Write Sectors ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
 
-            logger->info("read from c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
+            logger->info("write to c/h/s {}/{}/{} -> lba {}", cylinder, head, sector_nr, current_lba);
             current_lba = CHStoLBA(cylinder, head, sector_nr);
 
             sector_data_offset = 0;
@@ -370,31 +378,36 @@ void ATA::Impl::ExecuteCommand(uint8_t cmd)
         case command::Identify: {
             logger->info("command: Identify ({:x}), device {}, sector_count {} cylinder {} head {} sector_nr {} feature {}",
                 cmd, selected_device, sector_count, cylinder, head, sector_nr, feature);
-            Identify id{};
-            id.general_config = (1 << 15);
-            id.num_cylinders = NumCylinders;
-            id.num_heads = NumHeads;
-            id.sectors_per_track = SectorsPerTrack;
+            const auto image = SelectedDeviceToImage(imageProvider, selected_device);
+            if (image) {
+                Identify id{};
+                id.general_config = (1 << 15);
+                id.num_cylinders = NumCylinders;
+                id.num_heads = NumHeads;
+                id.sectors_per_track = SectorsPerTrack;
 
-            auto write_string = [&](uint16_t* dest, size_t num_words, const char* s) {
-                for(size_t n = 0; n < num_words; ++n)
-                    dest[n] = 0x2020;
-                for(size_t n = 0; n < strlen(s); ++n) {
-                    auto& v = dest[n / 2];
-                    if (n % 2)
-                        v = (v & 0xff00) | s[n];
-                    else
-                        v = (v & 0xff) | (s[n] << 8);
-                }
-            };
+                auto write_string = [&](uint16_t* dest, size_t num_words, const char* s) {
+                    for(size_t n = 0; n < num_words; ++n)
+                        dest[n] = 0x2020;
+                    for(size_t n = 0; n < strlen(s); ++n) {
+                        auto& v = dest[n / 2];
+                        if (n % 2)
+                            v = (v & 0xff00) | s[n];
+                        else
+                            v = (v & 0xff) | (s[n] << 8);
+                    }
+                };
 
-            write_string(&id.model[0], 20, "DUMMY DRIVE");
+                write_string(&id.model[0], 20, "DUMMY DRIVE");
 
-            memcpy(sector_data.data(), reinterpret_cast<const void*>(&id), sector_data.size());
-            sector_data_offset = 0;
-            sectors_left = 1;
-            transferMode = TransferMode::PeripheralToHost;
-            error = 0;
+                memcpy(sector_data.data(), reinterpret_cast<const void*>(&id), sector_data.size());
+                sector_data_offset = 0;
+                sectors_left = 1;
+                transferMode = TransferMode::PeripheralToHost;
+                error = 0;
+            } else {
+                error = error::AbortedCommand;
+            }
             break;
         }
         case command::SetMultipleMode: {

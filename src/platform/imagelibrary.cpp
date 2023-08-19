@@ -46,10 +46,17 @@ struct ImageLibrary::Impl : ImageProvider
 {
     std::array<ImageFile, static_cast<size_t>(Image::COUNT)> imageFiles;
 
+    Bytes GetSize(const Image image) override;
     size_t Read(const Image image, uint64_t offset, std::span<uint8_t> data) override;
     size_t Write(const Image image, uint64_t offset, std::span<const uint8_t> data) override;
 };
-    
+
+Bytes ImageLibrary::Impl::GetSize(const Image image)
+{
+    auto& imageFile = imageFiles[static_cast<size_t>(image)];
+    return imageFile.length;
+}
+
 size_t ImageLibrary::Impl::Read(const Image image, uint64_t offset, std::span<uint8_t> data)
 {
     auto& imageFile = imageFiles[static_cast<size_t>(image)];

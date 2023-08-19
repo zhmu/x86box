@@ -99,6 +99,8 @@ int main(int argc, char** argv)
         .help("use specified image for floppy disk 0");
     prog.add_argument("--hd0")
         .help("use specified image for hard disk 0");
+    prog.add_argument("--hd1")
+        .help("use specified image for hard disk 1");
     prog.add_argument("-d", "--disassemble")
         .help("enable live disassembly of code prior to execution once specified address is executing");
     try {
@@ -148,6 +150,10 @@ int main(int argc, char** argv)
 
     if (auto hd0 = prog.present("--hd0"); hd0 && !imageLibrary->SetImage(Image::Harddisk0, hd0->c_str())) {
         std::cerr << "Unable to attach hard disk image '" << *hd0 << "'\n";
+        return -1;
+    }
+    if (auto hd1 = prog.present("--hd1"); hd1 && !imageLibrary->SetImage(Image::Harddisk1, hd1->c_str())) {
+        std::cerr << "Unable to attach hard disk image '" << *hd1 << "'\n";
         return -1;
     }
 

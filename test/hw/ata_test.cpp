@@ -6,6 +6,10 @@
 #include "hw/ata.h"
 #include "bus/io.h"
 
+using ::testing::Return;
+using ::testing::Sequence;
+using ::testing::_;
+
 namespace
 {
     using SectorData = std::array<uint8_t, 512>;
@@ -33,6 +37,7 @@ namespace
 
     struct MockImageProvider : ImageProvider
     {
+        MOCK_METHOD(Bytes, GetSize, (const Image image), (override));
         MOCK_METHOD(size_t, Read, (const Image image, uint64_t offset, std::span<uint8_t> data), (override));
         MOCK_METHOD(size_t, Write, (const Image image, uint64_t offset, std::span<const uint8_t> data), (override));
     };
@@ -92,8 +97,49 @@ TEST_F(ATATest, Instantiation)
 {
 }
 
+TEST_F(ATATest, UnavailablePrimaryDriveIsNotReady)
+{
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk0))
+        .WillRepeatedly(Return(0));
+
+    io.Out8(io::DriveHead, 0xa0);
+    EXPECT_EQ(0b0000000, io.In8(io::AltStatus)); // /READY
+}
+
+TEST_F(ATATest, AvailablePrimaryDriveIsReady)
+{
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk0))
+        .WillRepeatedly(Return(31 * 1024 * 1024));
+
+    io.Out8(io::DriveHead, 0xa0);
+    EXPECT_EQ(0b1000000, io.In8(io::AltStatus)); // READY
+}
+
+
+TEST_F(ATATest, UnavailableSecondaryDriveIsNotReady)
+{
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk1))
+        .WillRepeatedly(Return(0));
+
+    io.Out8(io::DriveHead, 0xb0);
+    EXPECT_EQ(0b0000000, io.In8(io::AltStatus)); // /READY
+}
+
+TEST_F(ATATest, AvailableSecondaryDriveIsReady)
+{
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk1))
+        .WillRepeatedly(Return(31 * 1024 * 1024));
+
+    io.Out8(io::DriveHead, 0xb0);
+    EXPECT_EQ(0b1000000, io.In8(io::AltStatus)); // READY
+}
+
+
 TEST_F(ATATest, Identify)
 {
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk0))
+        .WillRepeatedly(Return(31 * 1024 * 1024));
+
     io.Out8(io::DriveHead, 0xa0);
     io.Out8(io::SectorCount, 0);
     io.Out8(io::CylinderHigh, 0);
@@ -113,8 +159,8 @@ TEST_F(ATATest, Identify)
 
 TEST_F(ATATest, ReadSectorsReadsOneSector)
 {
-    using ::testing::Return;
-    using ::testing::_;
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk0))
+        .WillRepeatedly(Return(31 * 1024 * 1024));
     EXPECT_CALL(imageProvider, Read(Image::Harddisk0, 0, _))
         .Times(1)
         .WillOnce(Return(512));
@@ -134,11 +180,10 @@ TEST_F(ATATest, ReadSectorsReadsOneSector)
 
 TEST_F(ATATest, ReadSectorsReadsMultipleSectors)
 {
-    constexpr auto numberOfSectors = 3;
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk0))
+        .WillRepeatedly(Return(31 * 1024 * 1024));
 
-    using ::testing::Sequence;
-    using ::testing::Return;
-    using ::testing::_;
+    constexpr auto numberOfSectors = 3;
 
     Sequence s;
     for(int n = 0; n < numberOfSectors; ++n) {
@@ -165,8 +210,8 @@ TEST_F(ATATest, ReadSectorsReadsMultipleSectors)
 
 TEST_F(ATATest, WriteSectorsWritesOneSector)
 {
-    using ::testing::Return;
-    using ::testing::_;
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk0))
+        .WillRepeatedly(Return(31 * 1024 * 1024));
     EXPECT_CALL(imageProvider, Write(Image::Harddisk0, 0, _))
         .Times(1)
         .WillOnce(Return(512));
@@ -186,11 +231,9 @@ TEST_F(ATATest, WriteSectorsWritesOneSector)
 
 TEST_F(ATATest, WriteSectorsWritesMultipleSectors)
 {
+    EXPECT_CALL(imageProvider, GetSize(Image::Harddisk0))
+        .WillRepeatedly(Return(31 * 1024 * 1024));
     constexpr auto numberOfSectors = 3;
-
-    using ::testing::Sequence;
-    using ::testing::Return;
-    using ::testing::_;
 
     Sequence s;
     for(int n = 0; n < numberOfSectors; ++n) {

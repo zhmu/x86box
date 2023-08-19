@@ -39,6 +39,7 @@ namespace
 
     struct MockImageProvider : ImageProvider
     {
+        MOCK_METHOD(Bytes, GetSize, (const Image image), (override));
         MOCK_METHOD(size_t, Read, (const Image image, uint64_t offset, std::span<uint8_t> data), (override));
         MOCK_METHOD(size_t, Write, (const Image image, uint64_t offset, std::span<const uint8_t> data), (override));
     };
