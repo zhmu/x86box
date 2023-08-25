@@ -103,6 +103,8 @@ int main(int argc, char** argv)
         .help("use specified image for hard disk 0");
     prog.add_argument("--hd1")
         .help("use specified image for hard disk 1");
+    prog.add_argument("--vgabios")
+        .help("use specified bios image as VGA bios");
     prog.add_argument("-d", "--disassemble")
         .help("enable live disassembly of code prior to execution once specified address is executing");
     try {
@@ -148,6 +150,9 @@ int main(int argc, char** argv)
     load_rom(*memory, prog.get<std::string>("bios"), [](size_t length) { return 0x100000 - length; });
     if (auto rom = prog.present("--rom"); rom) {
         load_rom(*memory, *rom, [](size_t length) { return 0xe8000; });
+    }
+    if (auto vgabios = prog.present("--vgabios"); vgabios) {
+        load_rom(*memory, *vgabios, [](size_t) { return 0xc0000; });
     }
 
     if (auto hd0 = prog.present("--hd0"); hd0 && !imageLibrary->SetImage(Image::Harddisk0, hd0->c_str())) {
