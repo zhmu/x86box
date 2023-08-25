@@ -161,13 +161,15 @@ HostIO::HostIO()
 
 HostIO::~HostIO() = default;
 
-void HostIO::Update()
+void HostIO::Render()
 {
-
     SDL_UpdateTexture(impl->texture, nullptr, impl->frameBuffer.get(), VGA::s_video_width * sizeof(uint32_t));
     SDL_RenderCopy(impl->renderer, impl->texture, nullptr, nullptr);
     SDL_RenderPresent(impl->renderer);
+}
 
+void HostIO::Update()
+{
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
@@ -177,8 +179,9 @@ void HostIO::Update()
 			case SDL_KEYDOWN: {
 				if (event.key.keysym.sym == SDLK_BACKQUOTE && (event.key.keysym.mod & (KMOD_LCTRL | KMOD_RCTRL)) ) {
 					impl->pendingEvents.push_back(EventType::ChangeImageFloppy0);
-                    break;
+					break;
 				}
+
                 const auto scancode = MapSDLKeycodeToScancodeSet1(event.key.keysym.sym);
                 if (scancode != 0) {
                     impl->pendingScancodes.push_back(scancode);

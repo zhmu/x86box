@@ -14,6 +14,7 @@ class HostIO final
     HostIO();
     ~HostIO();
 
+    void Render();
     void Update();
 
     void putpixel(unsigned int x, unsigned int y, uint32_t c);

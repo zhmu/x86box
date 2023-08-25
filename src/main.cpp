@@ -18,6 +18,7 @@
 #include "cpu/disassembler.h"
 
 #include <fstream>
+#include <csignal>
 #include <iostream>
 #include <iomanip>
 
@@ -29,6 +30,7 @@
 namespace {
 
 std::shared_ptr<spdlog::logger> trace_logger;
+bool running = true;
 
 constexpr inline auto emulatorCyclesPriorToUpdate = 500;
 
@@ -128,7 +130,7 @@ int main(int argc, char** argv)
     auto ppi = std::make_unique<PPI>(*io, *pit);
     auto rtc = std::make_unique<RTC>(*io, *time);
     auto fdc = std::make_unique<FDC>(*io, *pic, *dma, imageLibrary->GetImageProvider());
-    auto vga = std::make_unique<VGA>(*memory, *io, *hostio);
+    auto vga = std::make_unique<VGA>(*memory, *io, *hostio, *tick);
     auto keyboard = std::make_unique<Keyboard>(*io, *hostio);
 
     memory->Reset();
@@ -171,9 +173,11 @@ int main(int argc, char** argv)
         disassemble_address = decode_address(*disasm);
     }
 
+    signal(SIGINT, [](int) { running = false; });
+
     std::unique_ptr<Disassembler> disassembler;
     unsigned int emulatorCycle = 0;
-    for (bool running = true; running; ) {
+    while(running) {
         if (const auto event = hostio->GetPendingEvent(); event) {
             switch(*event) {
                 case HostIO::EventType::Terminate:
@@ -216,8 +220,11 @@ int main(int argc, char** argv)
             LogState(x86cpu->GetState());
         }
 
+        if (vga->Update()) {
+            hostio->Render();
+        }
+
         if (++emulatorCycle >= emulatorCyclesPriorToUpdate) {
-            vga->Update();
             hostio->Update();
             emulatorCycle = 0;
         }
@@ -234,5 +241,7 @@ int main(int argc, char** argv)
         }
         pic->SetPendingIRQState(PIC::IRQ::Keyboard, keyboard->IsQueueFilled());
     }
+
+    printf("stopped at cs:ip=%04x:%04x\n", x86cpu->GetState().m_cs, x86cpu->GetState().m_ip);
     return 0;
 }
