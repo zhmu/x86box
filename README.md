@@ -30,7 +30,15 @@ $ cmake --build build
 $ build/src/x86box --bios <path to bios.bin>
 ```
 
+### BIOS
+
 You'll need a suitable BIOS image - [micro_8088](https://github.com/skiselev/8088_bios) is a solid choice. The ``bios-micro8088.bin`` can be used.
+
+### VGA BIOS
+
+``8088_bios`` supports CGA text modes, which is sufficient to get started. However, the original IBM VGA BIOS ROM (``ibm_vga.bin``, available online) should also work. After downloading the BIOS image, passing ``--vgabios ibm_vga.bin`` to activate it.
+
+### XT-IDE
 
 If you want XT-IDE support, you can get the official [binaries](https://www.xtideuniversalbios.org/binaries/) - ``ide_xtl.bin`` is a good choice. Note that the checksum needs to be properly computed and the image must be padded to the correct side in order to be used. This can be performed using the ``checksum_pad_optionrom.py`` script as follows:
 
@@ -38,10 +46,12 @@ If you want XT-IDE support, you can get the official [binaries](https://www.xtid
 $ scripts/checksum_pad_optionrom.py ~/Downloads/ide_xtl.bin xtide.bin
 ```
 
+## Running the software
+
 With all these prerequites out of the way, you can launch ``x86box`` as follows:
 
 ``
-$ build/src/x86box  --bios bios-micro8088.bin --rom xtide.bin
+$ build/src/x86box --bios bios-micro8088.bin --vgabios ibm_vga.bin --rom xtide.bin
 ``
 
 ## Disk images
