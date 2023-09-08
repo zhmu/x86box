@@ -88,6 +88,7 @@ namespace
         auto& SF() { return Set<cpu::flag::SF>(); }
         auto& OF() { return Set<cpu::flag::OF>(); }
         auto& PF() { return Set<cpu::flag::PF>(); }
+        auto& DF() { return Set<cpu::flag::DF>(); }
 
         auto& AX(const uint16_t value) { State().m_ax = value; return *this; }
         auto& CX(const uint16_t value) { State().m_cx = value; return *this; }
@@ -472,129 +473,211 @@ TEST_F(CPUTest, STOSW)
 
 TEST_F(CPUTest, LODSB)
 {
-    th
-        .ExpectReadByte(initialIp)
-        .ExpectReadByte(0x12345, 0x1)
-        .DS(0x1234)
-        .SI(0x5)
-        .AX(0xffff)
-        .Execute({{
-            0xac                // lodsb
-        }})
-        .VerifyAX(0xff01)
-        .VerifySI(0x0006);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadByte(initialIp)
+            .ExpectReadByte(0x12345, 0x1)
+            .DS(0x1234)
+            .SI(0x5)
+            .AX(0xffff);
+    }, {{
+        0xac                // lodsb
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifyAX(0xff01)
+                .VerifySI(0x0006);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifyAX(0xff01)
+                .VerifySI(0x0004);
+        } }
+    }});
 }
 
 TEST_F(CPUTest, LODSW)
 {
-    th
-        .ExpectReadWord(0x1000f, 0x9f03)
-        .DS(0x1000)
-        .SI(0xf)
-        .AX(0xffff)
-        .Execute({{
-            0xad                // lodsw
-        }})
-        .VerifyAX(0x9f03)
-        .VerifySI(0x0011);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadWord(0x1000f, 0x9f03)
+            .DS(0x1000)
+            .SI(0xf)
+            .AX(0xffff);
+    }, {{
+        0xad                // lodsw
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifyAX(0x9f03)
+                .VerifySI(0x0011);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifyAX(0x9f03)
+                .VerifySI(0x000d);
+        } },
+    }});
 }
 
 TEST_F(CPUTest, MOVSB)
 {
-    th
-        .ExpectReadByte(initialIp)
-        .ExpectReadByte(0x1234a, 0x55)
-        .ExpectWriteByte(0xf0027, 0x55)
-        .DS(0x1234)
-        .SI(0xa)
-        .ES(0xf000)
-        .DI(0x27)
-        .Execute({{
-            0xa4                // movsb
-        }})
-        .VerifySI(0x000b)
-        .VerifyDI(0x0028);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadByte(initialIp)
+            .ExpectReadByte(0x1234a, 0x55)
+            .ExpectWriteByte(0xf0027, 0x55)
+            .DS(0x1234)
+            .SI(0xa)
+            .ES(0xf000)
+            .DI(0x27);
+    }, {{
+        0xa4                // movsb
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifySI(0x000b)
+                .VerifyDI(0x0028);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifySI(0x0009)
+                .VerifyDI(0x0026);
+        } }
+    }});
 }
 
 TEST_F(CPUTest, MOVSW)
 {
-    th
-        .ExpectReadByte(initialIp)
-        .ExpectReadWord(0x23459, 0x55aa)
-        .ExpectWriteWord(0x00003, 0x55aa)
-        .DS(0x2345)
-        .SI(0x9)
-        .ES(0x0)
-        .DI(0x3)
-        .Execute({{
-            0xa5                // movsw
-        }})
-        .VerifySI(0x000b)
-        .VerifyDI(0x0005);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadByte(initialIp)
+            .ExpectReadWord(0x23459, 0x55aa)
+            .ExpectWriteWord(0x00003, 0x55aa)
+            .DS(0x2345)
+            .SI(0x9)
+            .ES(0x0)
+            .DI(0x3);
+    }, {{
+        0xa5                // movsw
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifySI(0x000b)
+                .VerifyDI(0x0005);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifySI(0x0007)
+                .VerifyDI(0x0001);
+        } }
+    }});
 }
 
 TEST_F(CPUTest, CMPSB_Matches)
 {
-    th
-        .ExpectReadByte(initialIp)
-        .ExpectReadByte(0x12345, 0x1)
-        .ExpectReadByte(0x23456, 0x1)
-        .DS(0x1234)
-        .SI(0x5)
-        .ES(0x2345)
-        .DI(0x6)
-        .Execute({{
-            0xa6                // cmpsb
-        }})
-        .VerifySI(0x0006)
-        .VerifyDI(0x0007)
-        .VerifyZF(true);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadByte(initialIp)
+            .ExpectReadByte(0x12345, 0x1)
+            .ExpectReadByte(0x23456, 0x1)
+            .DS(0x1234)
+            .SI(0x5)
+            .ES(0x2345)
+            .DI(0x6);
+    }, {{
+        0xa6                // cmpsb
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifySI(0x0006)
+                .VerifyDI(0x0007)
+                .VerifyZF(true);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifySI(0x0004)
+                .VerifyDI(0x0005)
+                .VerifyZF(true);
+        } }
+    }});
 }
 
 TEST_F(CPUTest, CMPSB_Mismatches)
 {
-    th
-        .ExpectReadByte(initialIp)
-        .ExpectReadByte(0x12345, 0x1)
-        .ExpectReadByte(0x23456, 0xfe)
-        .DS(0x1234)
-        .SI(0x5)
-        .ES(0x2345)
-        .DI(0x6)
-        .Execute({{
-            0xa6                // cmpsb
-        }})
-        .VerifySI(0x0006)
-        .VerifyDI(0x0007)
-        .VerifyZF(false);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadByte(initialIp)
+            .ExpectReadByte(0x12345, 0x1)
+            .ExpectReadByte(0x23456, 0xfe)
+            .DS(0x1234)
+            .SI(0x5)
+            .ES(0x2345)
+            .DI(0x6);
+    }, {{
+        0xa6                // cmpsb
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifySI(0x0006)
+                .VerifyDI(0x0007)
+                .VerifyZF(false);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifySI(0x0004)
+                .VerifyDI(0x0005)
+                .VerifyZF(false);
+        } }
+    }});
 }
 
 TEST_F(CPUTest, SCASB_Matches)
 {
-    th
-        .ExpectReadByte(initialIp)
-        .ExpectReadByte(0x3434f, 0x94)
-        .ES(0x3430)
-        .DI(0x4f)
-        .AX(0x94)
-        .Execute({{
-            0xae                // scasb
-        }})
-        .VerifyDI(0x0050)
-        .VerifyZF(true);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadByte(initialIp)
+            .ExpectReadByte(0x3434f, 0x94)
+            .ES(0x3430)
+            .DI(0x4f)
+            .AX(0x94);
+    }, {{
+        0xae                // scasb
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifyDI(0x0050)
+                .VerifyZF(true);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifyDI(0x4e)
+                .VerifyZF(true);
+        } }
+    }});
 }
 
 TEST_F(CPUTest, SCASB_Mismatches)
 {
-    th
-        .ExpectReadByte(initialIp)
-        .ExpectReadByte(0x23900, 0x80)
-        .ES(0x2390)
-        .DI(0x0)
-        .AX(0x94)
-        .Execute({{
-            0xae                // scasb
-        }})
-        .VerifyDI(0x0001)
-        .VerifyZF(false);
+    RunTests([](auto& th) {
+        th
+            .ExpectReadByte(initialIp)
+            .ExpectReadByte(0x23900, 0x80)
+            .ES(0x2390)
+            .DI(0x0)
+            .AX(0x94);
+    }, {{
+        0xae                // scasb
+    }}, {{
+        { [](auto& th) { }, [](auto& th) {
+            th
+                .VerifyDI(0x0001)
+                .VerifyZF(false);
+        } },
+        { [](auto& th) { th.DF(); }, [](auto& th) {
+            th
+                .VerifyDI(0xffff)
+                .VerifyZF(false);
+        } }
+    }});
 }
