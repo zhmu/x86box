@@ -25,8 +25,27 @@ namespace
         MOCK_METHOD(uint16_t, In16, (io_port port), (override));
     };
 
-    struct MemoryMock : Memory
+    class MemoryMock : public MemoryInterface
     {
+        Memory memory;
+    public:
+        MemoryMock()
+        {
+            // By default, pass-through memory access as usual
+            ON_CALL(*this, ReadWord).WillByDefault([&](memory::Address addr) {
+                return memory.ReadWord(addr);
+            });
+            ON_CALL(*this, ReadByte).WillByDefault([&](memory::Address addr) {
+                return memory.ReadByte(addr);
+            });
+            ON_CALL(*this, WriteWord).WillByDefault([&](memory::Address addr, uint16_t value) {
+                memory.WriteWord(addr, value);
+            });
+            ON_CALL(*this, WriteByte).WillByDefault([&](memory::Address addr, uint8_t value) {
+                memory.WriteByte(addr, value);
+            });
+        }
+
         MOCK_METHOD(uint8_t, ReadByte, (memory::Address addr), (override));
         MOCK_METHOD(uint16_t, ReadWord, (memory::Address addr), (override));
 
@@ -36,6 +55,12 @@ namespace
         MOCK_METHOD(void, AddPeripheral, (memory::Address base, uint16_t length, MemoryMappedPeripheral& peripheral), (override));
 
         MOCK_METHOD(void*, GetPointer, (memory::Address addr, uint16_t length), (override));
+
+        void StoreBytes(memory::Address base, std::span<const uint8_t> bytes)
+        {
+            for(size_t n = 0; n < bytes.size(); ++n)
+                memory.WriteByte(base + n, bytes[n]);
+        }
     };
 
     struct StateBuilder
@@ -57,6 +82,11 @@ namespace
 
         auto& AX(const uint16_t value) { state.m_ax = value; return *this; }
         auto& CX(const uint16_t value) { state.m_cx = value; return *this; }
+        auto& DI(const uint16_t value) { state.m_di = value; return *this; }
+        auto& SI(const uint16_t value) { state.m_si = value; return *this; }
+
+        auto& ES(const uint16_t value) { state.m_es = value; return *this; }
+        auto& DS(const uint16_t value) { state.m_ds = value; return *this; }
     };
 
     struct CPUTest : ::testing::Test
@@ -67,20 +97,6 @@ namespace
 
         CPUTest() : cpu(memory, io)
         {
-            // By default, pass-through memory access as usual
-            ON_CALL(memory, ReadWord).WillByDefault([&](memory::Address addr) {
-                return memory.Memory::ReadWord(addr);
-            });
-            ON_CALL(memory, ReadByte).WillByDefault([&](memory::Address addr) {
-                return memory.Memory::ReadByte(addr);
-            });
-            ON_CALL(memory, WriteWord).WillByDefault([&](memory::Address addr, uint16_t value) {
-                memory.Memory::WriteWord(addr, value);
-            });
-            ON_CALL(memory, WriteByte).WillByDefault([&](memory::Address addr, uint8_t value) {
-                memory.Memory::WriteByte(addr, value);
-            });
-
             Reset(cpu);
         }
 
@@ -99,11 +115,7 @@ namespace
 
         void RunCodeBytes(std::span<const uint8_t> bytes)
         {
-            for(size_t n = 0; n < bytes.size(); ++n) {
-                ON_CALL(memory, ReadByte(initialIp + n))
-                    .WillByDefault(Return(bytes[n]));
-            }
-
+            memory.StoreBytes(initialIp, bytes);
             while(true) {
                 const auto& state = cpu.GetState();
                 if (CPUx86::MakeAddr(state.m_cs, state.m_ip) == initialIp + bytes.size())
@@ -386,4 +398,171 @@ TEST_F(CPUTest, JS)
         { [](auto& sb) { }, 0 },
         { [](auto& sb) { sb.SF(); }, 1 },
     }));
+}
+
+TEST_F(CPUTest, STOSB)
+{
+    EXPECT_CALL(memory, WriteByte(0x12345, 0x67));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.ES(0x1000).DI(0x2345).AX(0x67);
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xaa                // stosb
+    }));
+}
+
+TEST_F(CPUTest, STOSW)
+{
+    EXPECT_CALL(memory, WriteWord(0xabcde, 0x1378));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.ES(0xa000).DI(0xbcde).AX(0x1378);
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xab                // stosw
+    }));
+}
+
+TEST_F(CPUTest, LODSB)
+{
+    EXPECT_CALL(memory, ReadByte(initialIp));
+    EXPECT_CALL(memory, ReadByte(0x12345))
+        .WillOnce(Return(0x1));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.DS(0x1234).SI(0x5).AX(0xffff);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xac                // lodsb
+    }));
+    EXPECT_EQ(0xff01, cpu.GetState().m_ax);
+    EXPECT_EQ(0x0006, cpu.GetState().m_si);
+}
+
+TEST_F(CPUTest, LODSW)
+{
+    EXPECT_CALL(memory, ReadWord(0x1000f))
+        .WillOnce(Return(0x9f03));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.DS(0x1000).SI(0xf).AX(0xffff);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xad                // lodsw
+    }));
+    EXPECT_EQ(0x9f03, cpu.GetState().m_ax);
+    EXPECT_EQ(0x0011, cpu.GetState().m_si);
+}
+
+TEST_F(CPUTest, MOVSB)
+{
+    EXPECT_CALL(memory, ReadByte(initialIp));
+    EXPECT_CALL(memory, ReadByte(0x1234a))
+        .WillOnce(Return(0x55));
+    EXPECT_CALL(memory, WriteByte(0xf0027, 0x55));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.DS(0x1234).SI(0xa).ES(0xf000).DI(0x27);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xa4                // movsb
+    }));
+    EXPECT_EQ(0x000b, cpu.GetState().m_si);
+    EXPECT_EQ(0x0028, cpu.GetState().m_di);
+}
+
+TEST_F(CPUTest, MOVSW)
+{
+    EXPECT_CALL(memory, ReadByte(initialIp));
+    EXPECT_CALL(memory, ReadWord(0x23459))
+        .WillOnce(Return(0x55aa));
+    EXPECT_CALL(memory, WriteWord(0x00003, 0x55aa));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.DS(0x2345).SI(0x9).ES(0x0).DI(0x3);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xa5                // movsw
+    }));
+    EXPECT_EQ(0x000b, cpu.GetState().m_si);
+    EXPECT_EQ(0x0005, cpu.GetState().m_di);
+}
+
+TEST_F(CPUTest, CMPSB_Matches)
+{
+    EXPECT_CALL(memory, ReadByte(initialIp));
+    EXPECT_CALL(memory, ReadByte(0x12345))
+        .WillOnce(Return(0x1));
+    EXPECT_CALL(memory, ReadByte(0x23456))
+        .WillOnce(Return(0x1));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.DS(0x1234).SI(0x5).ES(0x2345).DI(0x6);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xa6                // cmpsb
+    }));
+    EXPECT_EQ(0x0006, cpu.GetState().m_si);
+    EXPECT_EQ(0x0007, cpu.GetState().m_di);
+    EXPECT_TRUE(cpu::FlagZero(cpu.GetState().m_flags));
+}
+
+TEST_F(CPUTest, CMPSB_Mismatches)
+{
+    EXPECT_CALL(memory, ReadByte(initialIp));
+    EXPECT_CALL(memory, ReadByte(0x12345))
+        .WillOnce(Return(0x1));
+    EXPECT_CALL(memory, ReadByte(0x23456))
+        .WillOnce(Return(0xfe));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.DS(0x1234).SI(0x5).ES(0x2345).DI(0x6);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xa6                // cmpsb
+    }));
+    EXPECT_EQ(0x0006, cpu.GetState().m_si);
+    EXPECT_EQ(0x0007, cpu.GetState().m_di);
+    EXPECT_FALSE(cpu::FlagZero(cpu.GetState().m_flags));
+}
+
+TEST_F(CPUTest, SCASB_Matches)
+{
+    EXPECT_CALL(memory, ReadByte(initialIp));
+    EXPECT_CALL(memory, ReadByte(0x3434f))
+        .WillOnce(Return(0x94));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.ES(0x3430).DI(0x4f).AX(0x94);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xae                // scasb
+    }));
+    EXPECT_EQ(0x0050, cpu.GetState().m_di);
+    EXPECT_TRUE(cpu::FlagZero(cpu.GetState().m_flags));
+}
+
+TEST_F(CPUTest, SCASB_Mismatches)
+{
+    EXPECT_CALL(memory, ReadByte(initialIp));
+    EXPECT_CALL(memory, ReadByte(0x23900))
+        .WillOnce(Return(0x80));
+
+    Reset(cpu);
+    StateBuilder sb{ cpu.GetState() };
+    sb.ES(0x2390).DI(0x0).AX(0x94);
+
+    RunCodeBytes(std::to_array<uint8_t>({
+        0xae                // scasb
+    }));
+    EXPECT_EQ(0x0001, cpu.GetState().m_di);
+    EXPECT_FALSE(cpu::FlagZero(cpu.GetState().m_flags));
 }
