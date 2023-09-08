@@ -1,6 +1,6 @@
 add_subdirectory(alu)
 
-add_executable(cpu_tests main.cpp cpu_test.cpp)
+add_executable(cpu_tests main.cpp flags.cpp jump.cpp string.cpp)
 target_include_directories(cpu_tests PRIVATE ../../src)
 # TODO put this in a library
 target_sources(cpu_tests PRIVATE ../../src/cpu/cpux86.cpp)
